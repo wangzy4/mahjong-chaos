@@ -1,0 +1,7 @@
+{
+  "scripts": {
+    "dev": "python -m http.server 5173",
+    "build": "node build.mjs"
+  },
+  "devDependencies": {}
+}

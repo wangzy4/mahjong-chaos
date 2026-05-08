@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>老千麻将</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main>
+      <h1>老千麻将</h1>
+
+      <section class="panel">
+        <label>昵称 <input id="playerName" placeholder="输入昵称" /></label>
+        <label>房间号 <input id="roomId" placeholder="例如 AB12CD" /></label>
+        <div class="actions">
+          <button id="createRoom">创建房间</button>
+          <button id="joinRoom">加入房间</button>
+          <button id="readyRoom">准备</button>
+          <button id="startGame">开始游戏</button>
+          <button id="connectWs">连接/重连</button>
+        </div>
+        <div>我的玩家 ID：<code id="playerIdText"></code></div>
+        <div>连接状态：<span id="wsStatus">未连接</span></div>
+        <div id="message"></div>
+      </section>
+
+      <section class="panel">
+        <h2>分享房间</h2>
+        <div>房间号：<strong id="roomIdText">-</strong></div>
+        <input id="shareLink" readonly placeholder="创建或加入房间后生成" />
+        <button id="copyShareLink">复制房间链接</button>
+      </section>
+
+      <section class="panel">
+        <h2>牌局</h2>
+        <div>状态：<span id="roomStatus">-</span></div>
+        <div>房主：<span id="hostPlayer">-</span></div>
+        <div>当前玩家：<span id="currentPlayer">-</span></div>
+        <div>牌墙剩余：<span id="wallCount">-</span></div>
+        <div>胡牌提示：<span id="huHint">-</span></div>
+        <div id="winnerBanner"></div>
+      </section>
+
+      <section class="panel">
+        <h2>我的手牌</h2>
+        <div id="hand" class="hand"></div>
+        <div class="actions">
+          <button id="discardTile">打出选中牌</button>
+          <button id="declareHu">胡牌</button>
+          <button id="huOnDiscard">点炮胡</button>
+          <button id="chiTile">吃</button>
+          <button id="pengTile">碰</button>
+          <button id="passAction">过</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>杠与技能</h2>
+        <label>
+          杠类型
+          <select id="gangType">
+            <option value="concealed_gang">暗杠</option>
+            <option value="exposed_gang">明杠</option>
+            <option value="added_gang">补杠</option>
+          </select>
+        </label>
+        <label>杠牌 <input id="gangTileValue" placeholder="1万" /></label>
+        <button id="gangTile">开杠</button>
+        <button id="usePeekWall">使用窥视牌墙</button>
+        <label>封印目标 <input id="sealPengTarget" placeholder="玩家 ID" /></label>
+        <button id="useSealPeng">使用封印碰牌</button>
+      </section>
+
+      <section class="panel">
+        <h2>玩家</h2>
+        <div id="players"></div>
+      </section>
+
+      <section class="panel">
+        <h2>分数与技能</h2>
+        <div>技能：<span id="skills">-</span></div>
+        <div>累计分：<span id="scores">-</span></div>
+        <div>本局变化：<span id="roundScoreDelta">-</span></div>
+        <div>结算：<span id="settlementSummary">-</span></div>
+        <div>窥视牌墙：<span id="peekWall">-</span></div>
+      </section>
+
+      <section class="panel">
+        <h2>操作日志</h2>
+        <pre id="actionLog"></pre>
+      </section>
+    </main>
+    <script src="/app.js"></script>
+  </body>
+</html>

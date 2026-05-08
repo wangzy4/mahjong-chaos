@@ -1,0 +1,90 @@
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: Arial, "Microsoft YaHei", sans-serif;
+  background: #f7f7f7;
+  color: #222;
+}
+
+main {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 12px;
+}
+
+.panel {
+  margin: 10px 0;
+  padding: 12px;
+  border: 1px solid #ddd;
+  background: #fff;
+}
+
+label {
+  display: block;
+  margin: 8px 0;
+}
+
+input,
+select,
+button {
+  min-height: 42px;
+  margin: 4px;
+  padding: 8px 10px;
+  font-size: 16px;
+}
+
+button {
+  border: 1px solid #777;
+  background: #fafafa;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.hand {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.tile {
+  min-width: 46px;
+  border: 1px solid #888;
+  background: #fff;
+}
+
+.selected {
+  background: #ffe08a;
+}
+
+.chi-selected {
+  background: #b7eb8f;
+}
+
+.winner {
+  color: #d00000;
+  font-size: 28px;
+  font-weight: bold;
+}
+
+#message {
+  color: #b00020;
+  min-height: 24px;
+}
+
+#shareLink {
+  width: min(100%, 620px);
+}
+
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: #f2f2f2;
+  padding: 8px;
+}

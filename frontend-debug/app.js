@@ -186,6 +186,12 @@ async function restartGame() {
 }
 
 async function sendAction(action) {
+  if (socket && socket.readyState === WebSocket.OPEN) {
+    const { type, ...payload } = action;
+    socket.send(JSON.stringify({ type, payload }));
+    showMessage(`已发送操作：${type}`);
+    return;
+  }
   const body = await request(`/rooms/${roomId()}/actions`, {
     method: "POST",
     body: JSON.stringify({ player_id: playerId(), ...action }),
@@ -213,12 +219,21 @@ function connectWebSocket() {
   if (socket) {
     socket.close();
   }
-  socket = new WebSocket(`${wsBase()}/ws/rooms/${roomId()}?viewer_id=${encodeURIComponent(playerId())}`);
+  socket = new WebSocket(`${wsBase()}/ws/${roomId()}/${encodeURIComponent(playerId())}`);
   socket.onopen = () => {
     $("wsStatus").textContent = "已连接";
   };
   socket.onmessage = (event) => {
-    renderState(JSON.parse(event.data));
+    const message = JSON.parse(event.data);
+    if (message.type === "state") {
+      renderState(message.data);
+    } else if (message.type === "error") {
+      showMessage(message.message);
+    } else if (message.type === "system") {
+      showMessage(message.message);
+    } else {
+      renderState(message);
+    }
   };
   socket.onclose = () => {
     $("wsStatus").textContent = "已断开";
@@ -411,8 +426,9 @@ function renderPlayers(state) {
 
 function renderNextGameButtons(state) {
   const isFinished = state.status === "finished";
+  const isWaiting = state.status === "waiting";
   const isHost = state.host_player_id === playerId();
-  $("readyNextGame").disabled = !isFinished || isHost;
+  $("readyNextGame").disabled = !(isWaiting || isFinished) || (isFinished && isHost);
   $("restartGame").disabled = !isFinished || !isHost;
 }
 

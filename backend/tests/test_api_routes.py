@@ -17,6 +17,17 @@ def test_create_room_api() -> None:
     assert body["status"] == "waiting"
 
 
+def test_create_room_api_with_api_prefix() -> None:
+    client = TestClient(create_app())
+
+    response = client.post("/api/rooms", json={"player_id": "p1", "name": "Alice"})
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["room_id"]
+    assert body["players"][0]["player_id"] == "p1"
+
+
 def test_join_room_api() -> None:
     client = TestClient(create_app())
     room_id = client.post("/rooms", json={"player_id": "p1", "name": "Alice"}).json()["room_id"]
@@ -32,7 +43,43 @@ def test_join_room_api() -> None:
         "name": "Bob",
         "ready": False,
         "is_host": False,
+        "connected": False,
     }
+
+
+def test_ready_api_marks_waiting_player_ready() -> None:
+    client = TestClient(create_app())
+    room_id = client.post("/rooms", json={"player_id": "p1", "name": "Alice"}).json()["room_id"]
+
+    response = client.post(f"/rooms/{room_id}/ready", json={"player_id": "p1", "ready": True})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["ready_player_ids"] == ["p1"]
+    assert body["players"][0]["ready"] is True
+
+
+def test_start_room_api_requires_all_ready_once_ready_flow_started() -> None:
+    client = TestClient(create_app())
+    room_id = create_full_room(client)
+    client.post(f"/rooms/{room_id}/ready", json={"player_id": "p1", "ready": True})
+
+    response = client.post(f"/rooms/{room_id}/start", json={"player_id": "p1"})
+
+    assert response.status_code == 400
+    assert "还有玩家未准备" in response.json()["detail"]
+
+
+def test_start_room_api_succeeds_when_all_players_ready() -> None:
+    client = TestClient(create_app())
+    room_id = create_full_room(client)
+    for player_id in ("p1", "p2", "p3", "p4"):
+        client.post(f"/rooms/{room_id}/ready", json={"player_id": player_id, "ready": True})
+
+    response = client.post(f"/rooms/{room_id}/start", json={"player_id": "p1"})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "playing"
 
 
 def test_start_room_api_requires_at_least_two_players() -> None:
@@ -208,6 +255,27 @@ def test_get_missing_room_returns_404() -> None:
     assert response.status_code == 404
 
 
+def test_frontend_index_is_served_for_share_link() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/?room_id=TEST01")
+
+    assert response.status_code == 200
+    assert "老千麻将" in response.text
+
+
+def test_frontend_app_uses_relative_api_and_dynamic_websocket_url() -> None:
+    client = TestClient(create_app())
+
+    response = client.get("/app.js")
+
+    assert response.status_code == 200
+    assert "/api" in response.text
+    assert 'window.location.protocol === "https:" ? "wss" : "ws"' in response.text
+    assert "localhost" not in response.text
+    assert "127.0.0.1" not in response.text
+
+
 def test_action_api_can_use_peek_wall() -> None:
     client = TestClient(create_app())
     room_id = create_full_room(client)
@@ -358,7 +426,15 @@ def test_seal_peng_skill_blocks_next_peng_chance() -> None:
     room.game_state.players["p2"].hand = [
         discard,
         discard,
-        *room.game_state.players["p2"].hand[:11],
+        Tile("wan", 2),
+        Tile("wan", 2),
+        Tile("wan", 2),
+        Tile("wan", 3),
+        Tile("wan", 3),
+        Tile("wan", 3),
+        Tile("wan", 4),
+        Tile("wan", 4),
+        Tile("tong", 5),
     ]
 
     seal_response = client.post(
@@ -578,6 +654,49 @@ def test_websocket_reconnect_gets_latest_private_state() -> None:
 
     assert body["status"] == "playing"
     assert len(body["private_data"]["peek_wall"]) == 3
+
+
+def test_new_websocket_sends_wrapped_initial_state() -> None:
+    client = TestClient(create_app())
+    room_id = client.post("/rooms", json={"player_id": "p1", "name": "Alice"}).json()["room_id"]
+
+    with client.websocket_connect(f"/ws/{room_id}/p1") as websocket:
+        body = websocket.receive_json()
+
+    assert body["type"] == "state"
+    assert body["data"]["room_id"] == room_id
+    assert body["data"]["players"][0]["connected"] is True
+
+
+def test_new_websocket_illegal_discard_returns_error() -> None:
+    client = TestClient(create_app())
+    room_id = create_full_room(client)
+    client.post(f"/rooms/{room_id}/start", json={"player_id": "p1"})
+
+    with client.websocket_connect(f"/ws/{room_id}/p2") as websocket:
+        websocket.receive_json()
+        websocket.send_json({"type": "discard", "payload": {"tile": "1万"}})
+        body = websocket.receive_json()
+
+    assert body["type"] == "error"
+    assert body["message"]
+
+
+def test_new_websocket_discard_broadcasts_state() -> None:
+    client = TestClient(create_app())
+    room_id = create_full_room(client)
+    client.post(f"/rooms/{room_id}/start", json={"player_id": "p1"})
+    before = client.get(f"/rooms/{room_id}/state", params={"viewer_id": "p1"}).json()
+    tile = before["players"][0]["hand"][0]
+
+    with client.websocket_connect(f"/ws/{room_id}/p1") as websocket:
+        websocket.receive_json()
+        websocket.send_json({"type": "discard", "payload": {"tile": tile}})
+        body = websocket.receive_json()
+
+    assert body["type"] == "state"
+    assert body["data"]["action_log"][-1]["type"] == "discard"
+    assert "hand" in body["data"]["players"][0]
 
 
 def create_full_room(client: TestClient) -> str:

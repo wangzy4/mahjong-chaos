@@ -39,7 +39,15 @@ class GameNotStartedError(RoomError):
     pass
 
 
+class GameAlreadyStartedError(RoomError):
+    pass
+
+
 class InvalidActionError(RoomError):
+    pass
+
+
+class InvalidRoomActionError(InvalidActionError):
     pass
 
 
@@ -61,7 +69,10 @@ class RoomManager:
     def join_room(self, room_id: str, player_id: str, player_name: str) -> Room:
         room = self.get_room(room_id)
         if room.status != "waiting":
-            raise InvalidActionError("房间不在等待状态")
+            if player_id in room.players:
+                room.players[player_id] = player_name
+                return room
+            raise GameAlreadyStartedError("游戏已经开始，暂时不允许新玩家加入")
         if player_id in room.players:
             room.players[player_id] = player_name
             return room
@@ -70,6 +81,26 @@ class RoomManager:
 
         room.players[player_id] = player_name
         return room
+
+    def set_ready(self, room_id: str, player_id: str, ready: bool = True) -> Room:
+        room = self.get_room(room_id)
+        if player_id not in room.players:
+            raise PlayerNotInRoomError("玩家不在房间内")
+        if room.status == "waiting":
+            if ready:
+                room.ready_player_ids.add(player_id)
+            else:
+                room.ready_player_ids.discard(player_id)
+            return room
+        if room.status == "finished":
+            if player_id == room.host_player_id:
+                raise InvalidActionError("房主不需要准备，请使用重新开始")
+            if ready:
+                room.ready_player_ids.add(player_id)
+            else:
+                room.ready_player_ids.discard(player_id)
+            return room
+        raise InvalidActionError("游戏进行中不能修改准备状态")
 
     def leave_room(self, room_id: str, player_id: str) -> Room:
         room = self.get_room(room_id)
@@ -92,6 +123,15 @@ class RoomManager:
             raise InvalidActionError("至少需要 2 名玩家才能开始游戏")
         if len(room.players) < 4 and not confirm_underfilled:
             raise InvalidActionError("当前少于 4 名玩家，需要房主确认后才能开始")
+        if room.ready_player_ids:
+            missing_ready_player_ids = [
+                ready_player_id
+                for ready_player_id in room.players
+                if ready_player_id not in room.ready_player_ids
+            ]
+            if missing_ready_player_ids:
+                missing = "、".join(missing_ready_player_ids)
+                raise InvalidActionError(f"还有玩家未准备：{missing}")
 
         skills = self._registry.list_skills()
         if not skills:
@@ -112,16 +152,7 @@ class RoomManager:
         return room
 
     def ready_for_next_game(self, room_id: str, player_id: str) -> Room:
-        room = self.get_room(room_id)
-        if player_id not in room.players:
-            raise PlayerNotInRoomError("玩家不在房间内")
-        if room.status != "finished":
-            raise InvalidActionError("只有本局结束后才能准备下一局")
-        if player_id == room.host_player_id:
-            raise InvalidActionError("房主不需要准备，请使用重新开始")
-
-        room.ready_player_ids.add(player_id)
-        return room
+        return self.set_ready(room_id, player_id, True)
 
     def restart_game(
         self,
@@ -158,6 +189,29 @@ class RoomManager:
         if room is None:
             raise RoomNotFoundError("房间不存在")
         return room
+
+    def mark_connected(self, room_id: str, player_id: str) -> Room:
+        room = self.get_room(room_id)
+        if player_id not in room.players:
+            raise PlayerNotInRoomError("玩家不在房间内")
+        room.connected_player_ids.add(player_id)
+        return room
+
+    def mark_disconnected(self, room_id: str, player_id: str) -> Room:
+        room = self.get_room(room_id)
+        if player_id not in room.players:
+            raise PlayerNotInRoomError("玩家不在房间内")
+        room.connected_player_ids.discard(player_id)
+        return room
+
+    def get_public_view(self, room_id: str, viewer_id: str) -> dict:
+        room = self.get_room(room_id)
+        if viewer_id not in room.players:
+            raise PlayerNotInRoomError("玩家不在房间内")
+
+        from backend.app.api.routes import _public_room_view
+
+        return _public_room_view(room, viewer_id)
 
     def handle_action(self, room_id: str, player_id: str, action: dict) -> Room:
         room = self.get_room(room_id)
@@ -203,7 +257,20 @@ class RoomManager:
                 )
             elif action_type == "pass_peng":
                 room.game_state = pass_peng(room.game_state, player_id)
+            elif action_type == "pass":
+                room.game_state = pass_peng(room.game_state, player_id)
             elif action_type == "hu":
+                self._ensure_claim_priority_allows(room.game_state, player_id, "hu")
+                room.game_state = self._handle_hu(room.game_state, player_id)
+                room.status = "finished"
+            elif action_type == "hu_on_discard":
+                self._ensure_claim_priority_allows(room.game_state, player_id, "hu")
+                if (
+                    room.game_state.last_discard is None
+                    or not room.game_state.last_discard.available_for_claim
+                    or room.game_state.last_discard.player_id == player_id
+                ):
+                    raise InvalidActionError("当前没有可以点炮胡的弃牌")
                 room.game_state = self._handle_hu(room.game_state, player_id)
                 room.status = "finished"
             elif action_type == "use_skill":
