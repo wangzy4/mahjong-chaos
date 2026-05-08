@@ -52,10 +52,15 @@ def create_app() -> FastAPI:
 
         @app.get("/{full_path:path}", include_in_schema=False)
         def serve_frontend(full_path: str) -> FileResponse:
+            no_cache_headers = {
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            }
             requested_file = frontend_dir / full_path
             if full_path and requested_file.is_file():
-                return FileResponse(requested_file)
-            return FileResponse(frontend_dir / "index.html")
+                return FileResponse(requested_file, headers=no_cache_headers)
+            return FileResponse(frontend_dir / "index.html", headers=no_cache_headers)
 
     return app
 
