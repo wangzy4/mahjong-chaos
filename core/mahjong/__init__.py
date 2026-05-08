@@ -1,0 +1,2 @@
+"""Mahjong rule engine package."""
+

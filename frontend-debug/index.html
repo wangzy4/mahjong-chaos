@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mahjong Chaos 调试页面</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 16px;
+      }
+
+      input,
+      button,
+      select {
+        margin: 4px;
+        padding: 6px;
+      }
+
+      button {
+        cursor: pointer;
+      }
+
+      .row {
+        margin: 8px 0;
+      }
+
+      .tile {
+        border: 1px solid #999;
+        background: #fff;
+        min-width: 42px;
+      }
+
+      .selected {
+        background: #ffe08a;
+      }
+
+      .chi-selected {
+        background: #b7eb8f;
+      }
+
+      pre {
+        background: #f3f3f3;
+        padding: 8px;
+        white-space: pre-wrap;
+      }
+
+      .panel {
+        border: 1px solid #ccc;
+        padding: 8px;
+        margin: 8px 0;
+      }
+
+      .hint {
+        color: #b00020;
+        font-weight: bold;
+      }
+
+      .winner {
+        color: #d00000;
+        font-size: 28px;
+        font-weight: bold;
+      }
+
+      .modal {
+        position: fixed;
+        inset: 0;
+        background: rgba(0, 0, 0, 0.35);
+        display: none;
+        align-items: flex-start;
+        justify-content: center;
+        overflow: auto;
+        padding: 24px 12px;
+        z-index: 10;
+      }
+
+      .modal.open {
+        display: flex;
+      }
+
+      .modal-content {
+        background: #fff;
+        border: 1px solid #999;
+        max-width: 900px;
+        width: 100%;
+        padding: 12px;
+      }
+
+      .modal-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+      }
+
+      .rule-section {
+        border-top: 1px solid #ddd;
+        margin-top: 8px;
+        padding-top: 8px;
+      }
+
+      .rule-section ul {
+        margin: 4px 0 8px 20px;
+        padding: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Mahjong Chaos 调试页面</h1>
+
+    <div class="panel">
+      <div class="row">
+        <label>后端地址 <input id="apiBase" value="http://127.0.0.1:8000" /></label>
+      </div>
+      <div class="row">
+        <label>玩家 ID <input id="playerId" value="p1" /></label>
+        <label>昵称 <input id="playerName" value="Alice" /></label>
+        <label>房间号 <input id="roomId" /></label>
+      </div>
+      <div class="row">
+        <button id="createRoom">创建房间</button>
+        <button id="joinRoom">加入房间</button>
+        <button id="startGame">开始游戏</button>
+        <button id="readyNextGame">准备下一局</button>
+        <button id="restartGame">重新开始</button>
+        <button id="connectWs">连接 WebSocket</button>
+        <button id="refreshState">刷新状态</button>
+        <button id="showRules">查看规则</button>
+      </div>
+      <div class="row">
+        <button id="drawTile">摸牌（自动）</button>
+        <button id="discardTile">出选中的牌</button>
+        <button id="pengTile">碰牌</button>
+        <button id="chiTile">吃牌</button>
+        <label>杠类型
+          <select id="gangType">
+            <option value="concealed_gang">暗杠</option>
+            <option value="exposed_gang">明杠</option>
+            <option value="added_gang">补杠</option>
+          </select>
+        </label>
+        <label>杠牌 <input id="gangTileValue" placeholder="1万" /></label>
+        <button id="gangTile">开杠</button>
+        <button id="passPeng">无人吃碰杠，继续</button>
+        <button id="declareHu">胡牌</button>
+        <button id="usePeekWall">使用窥视牌墙</button>
+        <label>封印目标 <input id="sealPengTarget" placeholder="玩家 ID" /></label>
+        <button id="useSealPeng">使用封印碰牌</button>
+        <label><input id="autoSortHand" type="checkbox" checked /> 自动理牌</label>
+      </div>
+      <div id="message"></div>
+      <div id="winnerBanner"></div>
+    </div>
+
+    <div class="panel">
+      <h2>牌局状态</h2>
+      <div>连接状态：<span id="wsStatus">未连接</span></div>
+      <div>房间状态：<span id="roomStatus">-</span></div>
+      <div>房主：<span id="hostPlayer">-</span></div>
+      <div>已准备：<span id="readyPlayers">-</span></div>
+      <div>当前玩家：<span id="currentPlayer">-</span></div>
+      <div>待响应提示：<span id="pengHint">-</span></div>
+      <div>牌墙剩余：<span id="wallCount">-</span></div>
+      <div>胡牌提示：<span id="huHint">-</span></div>
+      <div>胡牌公告：<span id="huNotice">-</span></div>
+      <div>累计分数：<span id="scores">-</span></div>
+      <div>本局变化：<span id="roundScoreDelta">-</span></div>
+      <div>结算摘要：<span id="settlementSummary">-</span></div>
+      <div>窥视牌墙看到：<span id="peekWall">-</span></div>
+    </div>
+
+    <div class="panel">
+      <h2>我的手牌</h2>
+      <div id="hand"></div>
+    </div>
+
+    <div class="panel">
+      <h2>玩家</h2>
+      <div id="players"></div>
+    </div>
+
+    <div class="panel">
+      <h2>我的技能</h2>
+      <div id="skills"></div>
+    </div>
+
+    <div class="panel">
+      <h2>操作日志</h2>
+      <pre id="actionLog"></pre>
+    </div>
+
+    <div id="rulesModal" class="modal">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h2>游戏规则</h2>
+          <button id="closeRules">关闭</button>
+        </div>
+        <div id="rulesContent"></div>
+      </div>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
