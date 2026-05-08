@@ -7,6 +7,7 @@ let selectedSkillIds = [];
 let activeManualTab = "operate";
 let manualOpen = false;
 let reconnectTimer = null;
+let currentParamTemplateSkillId = null;
 
 const $ = (id) => document.getElementById(id);
 
@@ -54,7 +55,7 @@ const SKILL_INFO = {
     type: "主动目标",
     limit: "四巡一次",
     effect: "查看上家或下家的随机两张手牌。",
-    usage: "自己回合使用。target_direction 填 prev 看上家，填 next 看下家。",
+    usage: "自己回合使用。文本框已填好模板，只需要把 target_direction 改成 prev 或 next。",
     params: '{"target_direction":"prev"}',
   },
   swap_with_neighbor: {
@@ -62,7 +63,7 @@ const SKILL_INFO = {
     type: "主动目标",
     limit: "每局 2 次",
     effect: "你指定给出一张牌，随机获得上家或下家的一张牌。",
-    usage: "自己回合使用。give_tile 填你要交出去的牌。",
+    usage: "自己回合使用。文本框已填好模板，只需要改方向和你要交出去的牌名。",
     params: '{"target_direction":"next","give_tile":"3万"}',
   },
   killing_intent_sense: {
@@ -78,7 +79,7 @@ const SKILL_INFO = {
     type: "主动改牌",
     limit: "四巡一次",
     effect: "把一张牌换成数字相同的另一花色牌，目标牌必须还在牌墙里。",
-    usage: "自己回合使用。from_tile 填手牌，to_suit 填 wan、tong 或 tiao。",
+    usage: "自己回合使用。只需要改 from_tile 的牌名和 to_suit 的花色。wan=万，tong=筒，tiao=条。",
     params: '{"from_tile":"5万","to_suit":"tong"}',
   },
   stealth_gang: {
@@ -86,7 +87,7 @@ const SKILL_INFO = {
     type: "主动杠",
     limit: "每局 1 次",
     effect: "手里有三张相同牌时，从牌墙拿第 4 张，直接形成暗杠并按暗杠结算。",
-    usage: "自己回合使用。tile 填你手里有三张的牌。",
+    usage: "自己回合使用。只需要把 tile 改成你手里有三张的牌名。",
     params: '{"tile":"5万"}',
   },
   steal_concealed_gang: {
@@ -94,7 +95,7 @@ const SKILL_INFO = {
     type: "主动目标",
     limit: "每局 1 次",
     effect: "用自己一张牌替换别人暗杠中的一张真实牌，一个暗杠只能被偷一次。",
-    usage: "填写目标玩家 ID 和你要交出去的牌。target_meld_id 目前可不填。",
+    usage: "填写目标玩家 ID，并把 your_tile 改成你要交出去的牌名。target_meld_id 目前不用填。",
     params: '{"target_player_id":"p2","your_tile":"3万"}',
   },
   recycle_river: {
@@ -102,7 +103,7 @@ const SKILL_INFO = {
     type: "主动摸牌替代",
     limit: "自己牌河 1 次，别人牌河 1 次",
     effect: "摸牌前改为从牌河拿回一张指定牌。",
-    usage: "source 填 own 或 others；别人牌河需要 target_player_id。",
+    usage: "只需要改来源、目标玩家 ID 和要回收的牌名。source=own 表示自己的牌河，others 表示别人的牌河。",
     params: '{"source":"others","target_player_id":"p2","tile":"3万"}',
   },
   wish_tile: {
@@ -110,7 +111,7 @@ const SKILL_INFO = {
     type: "主动摸牌替代",
     limit: "每局 1 次",
     effect: "摸牌前许愿一张牌。牌墙里有就直接拿，没有则消耗技能并正常摸一张。",
-    usage: "自己摸牌前使用。tile 填想要的牌。",
+    usage: "自己摸牌前使用。只需要把 tile 改成想要的牌名。",
     params: '{"tile":"5筒"}',
   },
 };
@@ -432,13 +433,16 @@ function updateSkillUseHelp() {
   const info = skillInfo(skillId);
   $("skillUseHelp").innerHTML = `<strong>${info.name}</strong>（${info.type}，${info.limit}）：${info.effect}<br />使用方式：${info.usage}`;
   if (info.params) {
-    $("skillParamsInput").placeholder = info.params;
-    if (!$("skillParamsInput").value.trim()) {
-      $("skillParamsInput").value = info.params;
+    const template = formatSkillParamsTemplate(info.params);
+    $("skillParamsInput").placeholder = template;
+    if (currentParamTemplateSkillId !== skillId || !$("skillParamsInput").value.trim()) {
+      $("skillParamsInput").value = template;
+      currentParamTemplateSkillId = skillId;
     }
   } else {
     $("skillParamsInput").placeholder = "该技能不用手动填写参数";
     $("skillParamsInput").value = "";
+    currentParamTemplateSkillId = skillId;
   }
 }
 
@@ -591,6 +595,14 @@ function parseSkillParams() {
   return JSON.parse(text);
 }
 
+function formatSkillParamsTemplate(paramsText) {
+  try {
+    return JSON.stringify(JSON.parse(paramsText), null, 2);
+  } catch {
+    return paramsText;
+  }
+}
+
 function skillInfo(skillId) {
   return (
     SKILL_INFO[skillId] || {
@@ -640,7 +652,7 @@ function renderSkillManual() {
     card.appendChild(skillDescriptionNode(skillId, info));
     if (info.params) {
       const params = document.createElement("code");
-      params.textContent = `参数示例：${info.params}`;
+      params.textContent = `参数模板：${formatSkillParamsTemplate(info.params)}`;
       card.appendChild(params);
     }
     $("skillManualList").appendChild(card);
