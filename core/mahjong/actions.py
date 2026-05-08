@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from core.mahjong.game_state import GameState, LastDiscard
-from core.mahjong.hu_checker import can_hu
+from core.mahjong.hu_checker import can_hu, can_hu_with_melds
 from core.mahjong.player import Meld, PlayerState
 from core.mahjong.scoring import apply_delta, calculate_gang_delta
 from core.mahjong.tile import Tile, sort_tiles, tile_to_str
@@ -23,6 +23,8 @@ class ActionType(StrEnum):
     SUPPLEMENT_DRAW = "supplement_draw"
     DECLARE_HU = "declare_hu"
     USE_SKILL = "use_skill"
+    SELECT_SKILLS = "select_skills"
+    CONFIRM_DISCARD = "confirm_discard"
 
 
 @dataclass(frozen=True, slots=True)
@@ -84,6 +86,11 @@ def start_game(
         ],
         scores={player_id: 0 for player_id in player_ids},
         round_score_delta={player_id: 0 for player_id in player_ids},
+        turn_counts={player_id: 0 for player_id in player_ids},
+        player_effects={player_id: [] for player_id in player_ids},
+        river_recycle_usage={
+            player_id: {"own": 0, "others": 0} for player_id in player_ids
+        },
     )
 
 
@@ -110,6 +117,30 @@ def discard_tile(state: GameState, player_id: str, tile: Tile) -> GameState:
         raise ValueError("只有当前玩家可以出牌")
     if not state.current_turn_has_drawn:
         raise ValueError("当前玩家需要先摸牌再出牌")
+    if (
+        state.pending_action is not None
+        and state.pending_action.get("type") == "confirm_dangerous_discard"
+    ):
+        raise ValueError("请先确认或取消危险弃牌")
+    if _should_warn_dangerous_discard(state, player_id, tile):
+        next_state = deepcopy(state)
+        next_state.pending_action = {
+            "type": "confirm_dangerous_discard",
+            "player_id": player_id,
+            "tile": tile,
+        }
+        _add_private_skill_result(
+            next_state,
+            player_id,
+            {
+                "type": "killing_intent_sense",
+                "message": "这张牌可能点炮，是否仍然打出？",
+                "tile": tile_to_str(tile),
+            },
+        )
+        _record_player_skill_use(next_state, player_id, "killing_intent_sense")
+        next_state.action_log.append({"type": "passive_skill_triggered", "player_id": player_id})
+        return next_state
 
     next_state = deepcopy(state)
     player = next_state.players[player_id]
@@ -140,6 +171,58 @@ def discard_tile(state: GameState, player_id: str, tile: Tile) -> GameState:
             "can_hu": can_hu(player.hand),
         }
     )
+    next_state.turn_counts[player_id] = next_state.turn_counts.get(player_id, 0) + 1
+    return next_state
+
+
+def confirm_discard(state: GameState, player_id: str, confirm: bool) -> GameState:
+    if state.pending_action is None:
+        raise ValueError("当前没有需要确认的操作")
+    if state.pending_action.get("type") != "confirm_dangerous_discard":
+        raise ValueError("当前待确认操作不是危险弃牌")
+    if state.pending_action.get("player_id") != player_id:
+        raise ValueError("只能由触发玩家确认危险弃牌")
+
+    tile = state.pending_action["tile"]
+    next_state = deepcopy(state)
+    next_state.pending_action = None
+    next_state.action_log.append(
+        {"type": ActionType.CONFIRM_DISCARD.value, "player_id": player_id, "confirm": confirm}
+    )
+    if not confirm:
+        return next_state
+    return discard_tile(next_state, player_id, tile)
+
+
+def select_skills(
+    state: GameState,
+    player_id: str,
+    selected_skill_ids: list[str],
+) -> GameState:
+    if state.phase != "skill_selection":
+        raise ValueError("当前不在技能选择阶段")
+    if player_id not in state.players:
+        raise ValueError("玩家不存在")
+    if len(selected_skill_ids) != 2:
+        raise ValueError("必须选择 2 个技能")
+    if len(set(selected_skill_ids)) != 2:
+        raise ValueError("不能重复选择同一个技能")
+
+    next_state = deepcopy(state)
+    player = next_state.players[player_id]
+    if any(skill_id not in player.skill_candidates for skill_id in selected_skill_ids):
+        raise ValueError("只能从候选技能中选择")
+    player.skills = list(selected_skill_ids)
+    next_state.action_log.append(
+        {
+            "type": ActionType.SELECT_SKILLS.value,
+            "player_id": player_id,
+            "selected_count": len(selected_skill_ids),
+        }
+    )
+    if all(len(next_state.players[pid].skills) == 2 for pid in next_state.player_order):
+        next_state.phase = "playing"
+        next_state.action_log.append({"type": "skill_selection_finished"})
     return next_state
 
 
@@ -287,6 +370,8 @@ def use_skill(
 ) -> GameState:
     if player_id not in state.players:
         raise ValueError("玩家不存在")
+    if state.phase != "playing":
+        raise ValueError("技能只能在正式开局后使用")
 
     player = state.players[player_id]
     if skill_id not in player.skills:
@@ -303,6 +388,10 @@ def use_skill(
     if current_record.used_count >= skill.max_uses_per_game:
         raise ValueError("技能使用次数已达上限")
 
+    reflected_state = _try_reflect_target_skill(state, player_id, skill_id, params, skill)
+    if reflected_state is not None:
+        return reflected_state
+
     if not skill.can_use(state, player_id, params):
         raise ValueError("当前不能使用这个技能")
 
@@ -314,6 +403,7 @@ def use_skill(
         used_count=current_record.used_count + 1,
     )
     player_usage[skill_id] = next_record
+    next_state.players[player_id].skill_usage[skill_id] = next_record.used_count
     next_state.action_log.append(
         {
             "type": ActionType.USE_SKILL.value,
@@ -570,3 +660,90 @@ def _draw_for_current_player(state: GameState, auto: bool) -> GameState:
 def _sort_hand_if_enabled(player: PlayerState) -> None:
     if player.auto_sort_hand:
         player.hand = sort_tiles(player.hand)
+
+
+def _add_private_skill_result(state: GameState, player_id: str, result: dict) -> None:
+    state.players[player_id].private_skill_results.append(result)
+    private_results = state.private_data.setdefault(player_id, {}).setdefault(
+        "private_skill_results",
+        [],
+    )
+    private_results.append(result)
+
+
+def _record_player_skill_use(state: GameState, player_id: str, skill_id: str) -> None:
+    used_count = state.players[player_id].skill_usage.get(skill_id, 0) + 1
+    state.players[player_id].skill_usage[skill_id] = used_count
+    state.skill_usage.setdefault(player_id, {})[skill_id] = SkillUseRecord(
+        player_id=player_id,
+        skill_id=skill_id,
+        used_count=used_count,
+    )
+
+
+def _should_warn_dangerous_discard(state: GameState, player_id: str, tile: Tile) -> bool:
+    player = state.players[player_id]
+    if "killing_intent_sense" not in player.skills:
+        return False
+    if player.skill_usage.get("killing_intent_sense", 0) >= 1:
+        return False
+    for other_player_id, other_player in state.players.items():
+        if other_player_id == player_id:
+            continue
+        if can_hu_with_melds([*other_player.hand, tile], other_player.melds):
+            return True
+    return False
+
+
+def _try_reflect_target_skill(
+    state: GameState,
+    player_id: str,
+    skill_id: str,
+    params: dict[str, object],
+    skill,
+) -> GameState | None:
+    if skill_id not in {"peek_neighbor", "swap_with_neighbor", "steal_concealed_gang"}:
+        return None
+    if getattr(skill, "reflected_apply", None) is None:
+        return None
+    target_player_id = _target_player_id_for_skill(state, player_id, skill_id, params)
+    if target_player_id is None:
+        return None
+    target = state.players[target_player_id]
+    if "mirror_reflection" not in target.skills:
+        return None
+    if target.skill_usage.get("mirror_reflection", 0) >= 1:
+        return None
+
+    next_state = deepcopy(state)
+    _record_player_skill_use(next_state, target_player_id, "mirror_reflection")
+    next_state.action_log.append(
+        {
+            "type": "mirror_reflection",
+            "player_id": target_player_id,
+            "reflected_player_id": player_id,
+            "reflected_skill_id": skill_id,
+        }
+    )
+    return skill.reflected_apply(
+        next_state,
+        original_player_id=player_id,
+        target_player_id=target_player_id,
+    )
+
+
+def _target_player_id_for_skill(
+    state: GameState,
+    player_id: str,
+    skill_id: str,
+    params: dict[str, object],
+) -> str | None:
+    if skill_id == "steal_concealed_gang":
+        target = params.get("target_player_id")
+        return target if isinstance(target, str) else None
+    direction = params.get("target_direction")
+    if direction not in {"prev", "next"}:
+        return None
+    current_index = state.player_order.index(player_id)
+    offset = -1 if direction == "prev" else 1
+    return state.player_order[(current_index + offset) % len(state.player_order)]

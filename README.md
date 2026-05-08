@@ -101,6 +101,16 @@ http://127.0.0.1:5173
 
 更多联网协议说明见 `docs/online.md`。
 
+## 技能选择
+
+每局开始后会先进入技能选择阶段。每名玩家随机获得 3 个候选技能，只能自己看到；选择其中 2 个后等待其他玩家。所有人都完成选择后，游戏进入正式 `playing` 阶段。
+
+技能说明见 `docs/skills.md`。技能相关测试可以直接运行：
+
+```powershell
+python -m pytest backend/tests/test_new_skill_system.py
+```
+
 ## Docker 部署
 
 ```powershell

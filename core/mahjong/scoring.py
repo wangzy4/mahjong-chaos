@@ -46,6 +46,10 @@ def apply_delta(state: GameState, delta: dict[str, int], event: dict) -> GameSta
             "fan_multiplier": score_event.get("fan_multiplier"),
             "dealer_multiplier": score_event.get("dealer_multiplier"),
             "double_score_multiplier": score_event.get("double_score_multiplier"),
+            "skill_multipliers": score_event.get("skill_multipliers"),
+            "skill_multiplier": score_event.get("skill_multiplier"),
+            "total_multiplier": score_event.get("total_multiplier"),
+            "skill_id": score_event.get("skill_id"),
             "multiplier": score_event.get("multiplier"),
             "fans": score_event.get("fans"),
             "fan_labels": score_event.get("fan_labels"),
@@ -67,13 +71,21 @@ def calculate_win_delta(
 
     fan_result = detect_fans(state, winner_id, win_type, winning_tile)
     double_score_multiplier = _double_score_multiplier(state, winner_id, loser_id, win_type)
+    skill_multipliers = _skill_win_multipliers(state, winner_id, fan_result.fans, winning_tile)
+    skill_multiplier = _multiply_skill_multipliers(skill_multipliers)
     delta = zero_delta(state.player_order)
     payments: list[dict] = []
 
     if win_type == "discard":
         assert loser_id is not None
         dealer_multiplier = _dealer_payment_multiplier(state, winner_id, loser_id)
-        amount = 3 * fan_result.multiplier * dealer_multiplier * double_score_multiplier
+        amount = (
+            3
+            * fan_result.multiplier
+            * dealer_multiplier
+            * double_score_multiplier
+            * skill_multiplier
+        )
         _apply_payment(delta, loser_id, winner_id, amount)
         payments.append(
             _payment(
@@ -91,7 +103,13 @@ def calculate_win_delta(
             if payer_id == winner_id:
                 continue
             dealer_multiplier = _dealer_payment_multiplier(state, winner_id, payer_id)
-            amount = 2 * fan_result.multiplier * dealer_multiplier * double_score_multiplier
+            amount = (
+                2
+                * fan_result.multiplier
+                * dealer_multiplier
+                * double_score_multiplier
+                * skill_multiplier
+            )
             _apply_payment(delta, payer_id, winner_id, amount)
             payments.append(
                 _payment(
@@ -121,7 +139,10 @@ def calculate_win_delta(
         "dealer_id": state.dealer_id,
         "dealer_multiplier": max(payment["dealer_multiplier"] for payment in payments),
         "double_score_multiplier": double_score_multiplier,
-        "multiplier": fan_result.multiplier * double_score_multiplier,
+        "skill_multipliers": skill_multipliers,
+        "skill_multiplier": skill_multiplier,
+        "multiplier": fan_result.multiplier * double_score_multiplier * skill_multiplier,
+        "total_multiplier": fan_result.multiplier * double_score_multiplier * skill_multiplier,
         "payments": payments,
         "delta": delta,
     }
@@ -291,10 +312,14 @@ def settle_win(
         "dealer_id": event["dealer_id"],
         "dealer_multiplier": event["dealer_multiplier"],
         "double_score_multiplier": event["double_score_multiplier"],
+        "skill_multipliers": list(event["skill_multipliers"]),
+        "skill_multiplier": event["skill_multiplier"],
+        "total_multiplier": event["total_multiplier"],
         "payments": list(event["payments"]),
         "delta": dict(delta),
     }
-    return apply_delta(state, delta, event)
+    state = apply_delta(state, delta, event)
+    return _settle_failed_desperate_gambles(state, winner_id)
 
 
 def _validate_win_context(
@@ -368,6 +393,124 @@ def _has_double_score(state: GameState, player_id: str) -> bool:
     if "double_score" in player.skills:
         return True
     return bool(state.private_data.get(player_id, {}).get("double_score"))
+
+
+def _skill_win_multipliers(
+    state: GameState,
+    winner_id: str,
+    fans: list[str],
+    winning_tile: Tile | None,
+) -> list[dict]:
+    multipliers: list[dict] = []
+    if _has_effect(state, winner_id, "desperate_gamble"):
+        multipliers.append({"skill_id": "desperate_gamble", "multiplier": 4})
+
+    close_enough_reason = _close_enough_reasons(state, winner_id, fans, winning_tile)
+    player = state.players[winner_id]
+    if (
+        "close_enough" in player.skills
+        and not player.skill_usage.get("close_enough")
+        and close_enough_reason
+    ):
+        multipliers.append(
+            {
+                "skill_id": "close_enough",
+                "multiplier": 2,
+                "close_enough_reason": close_enough_reason,
+            }
+        )
+        player.skill_usage["close_enough"] = 1
+    return multipliers
+
+
+def _multiply_skill_multipliers(skill_multipliers: list[dict]) -> int:
+    result = 1
+    for item in skill_multipliers:
+        result *= int(item["multiplier"])
+    return result
+
+
+def _close_enough_reasons(
+    state: GameState,
+    player_id: str,
+    fans: list[str],
+    winning_tile: Tile | None,
+) -> list[str]:
+    if any(fan in fans for fan in {"menqing", "qingyise", "pengpenghu", "qidui"}):
+        return []
+    player = state.players[player_id]
+    reasons = []
+    all_tiles = [*player.hand]
+    if winning_tile is not None:
+        all_tiles.append(winning_tile)
+    for meld in player.melds:
+        all_tiles.extend(meld.tiles)
+    suit_counts: dict[str, int] = {}
+    for tile in all_tiles:
+        suit_counts[str(tile.suit)] = suit_counts.get(str(tile.suit), 0) + 1
+    if suit_counts and len(all_tiles) - max(suit_counts.values()) <= 3:
+        reasons.append("near_qingyise")
+
+    open_meld_count = sum(
+        1 for meld in player.melds if meld.type in {"chi", "peng", "exposed_gang", "added_gang"}
+    )
+    if open_meld_count == 1:
+        reasons.append("near_menqing")
+
+    triplet_count = sum(
+        1
+        for meld in player.melds
+        if meld.type in {"peng", "exposed_gang", "concealed_gang", "added_gang"}
+    )
+    counts: dict[Tile, int] = {}
+    for tile in player.hand:
+        counts[tile] = counts.get(tile, 0) + 1
+    triplet_count += sum(count // 3 for count in counts.values())
+    if triplet_count >= 3:
+        reasons.append("near_pengpenghu")
+    return reasons
+
+
+def _has_effect(state: GameState, player_id: str, effect_type: str) -> bool:
+    return any(
+        effect.get("type") == effect_type
+        for effect in state.player_effects.get(player_id, [])
+    )
+
+
+def _settle_failed_desperate_gambles(state: GameState, winner_id: str) -> GameState:
+    for player_id in state.player_order:
+        if player_id == winner_id or not _has_effect(state, player_id, "desperate_gamble"):
+            continue
+        effects = state.player_effects.get(player_id, [])
+        effect = next(
+            (
+                item
+                for item in effects
+                if item.get("type") == "desperate_gamble" and not item.get("settled")
+            ),
+            None,
+        )
+        if effect is None:
+            continue
+        delta = zero_delta(state.player_order)
+        delta[player_id] = -24
+        receivers = [other_id for other_id in state.player_order if other_id != player_id]
+        for other_id in receivers:
+            delta[other_id] = 8
+        effect["settled"] = True
+        state = apply_delta(
+            state,
+            delta,
+            {
+                "type": "skill_penalty",
+                "label": "破釜沉舟失败惩罚",
+                "player_id": player_id,
+                "skill_id": "desperate_gamble",
+                "message": f"玩家 {player_id} 破釜沉舟未胡牌，额外结算：{_delta_text(delta)}",
+            },
+        )
+    return state
 
 
 def _apply_payment(

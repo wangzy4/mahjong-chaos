@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.api.routes import room_manager
@@ -239,8 +240,9 @@ def test_get_room_state_api_returns_public_view() -> None:
     assert body["status"] == "playing"
     assert body["players"][0]["hand"]
     assert "hand" not in body["players"][1]
-    assert len(body["players"][0]["skills"]) == 1
-    assert body["players"][0]["skills"][0] in {"peek_wall", "seal_peng", "double_score"}
+    assert body["phase"] == "skill_selection"
+    assert len(body["players"][0]["skill_candidates"]) == 3
+    assert body["players"][0]["skills"] == []
     assert body["players"][1]["skills"] == []
     assert "wall" not in body
     assert body["can_hu"] is False
@@ -282,16 +284,17 @@ def test_action_api_can_use_peek_wall() -> None:
     client.post(f"/rooms/{room_id}/start", json={"player_id": "p1"})
     room = room_manager.get_room(room_id)
     assert room.game_state is not None
-    room.game_state.players["p1"].skills = ["peek_wall"]
+    room.game_state.phase = "playing"
+    room.game_state.players["p1"].skills = ["astrology", "wish_tile"]
 
     response = client.post(
         f"/rooms/{room_id}/actions",
-        json={"player_id": "p1", "type": "use_skill", "skill_id": "peek_wall"},
+        json={"player_id": "p1", "type": "use_skill", "skill_id": "astrology"},
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body["private_data"]["peek_wall"]) == 3
+    assert len(body["private_data"]["private_skill_results"][-1]["tiles"]) == 4
     assert body["action_log"][-1]["type"] == "use_skill"
 
 
@@ -357,6 +360,9 @@ def test_discard_action_enters_pending_peng_phase() -> None:
     client = TestClient(create_app())
     room_id = create_full_room(client)
     client.post(f"/rooms/{room_id}/start", json={"player_id": "p1"})
+    room = room_manager.get_room(room_id)
+    assert room.game_state is not None
+    room.game_state.phase = "playing"
     before = client.get(f"/rooms/{room_id}/state", params={"viewer_id": "p1"}).json()
     tile = before["players"][0]["hand"][0]
 
@@ -381,6 +387,7 @@ def test_peng_action_records_melds_in_public_view() -> None:
     client.post(f"/rooms/{room_id}/start", json={"player_id": "p1"})
     room = room_manager.get_room(room_id)
     assert room.game_state is not None
+    room.game_state.phase = "playing"
     discard = Tile("wan", 1)
     room.game_state.players["p1"].hand = [discard, *room.game_state.players["p1"].hand[:13]]
     room.game_state.players["p2"].hand = [
@@ -414,6 +421,7 @@ def test_peng_action_records_melds_in_public_view() -> None:
     ]
 
 
+@pytest.mark.skip(reason="旧 seal_peng 技能已从新 12 技能池停用")
 def test_seal_peng_skill_blocks_next_peng_chance() -> None:
     client = TestClient(create_app())
     room_id = create_full_room(client)
@@ -475,6 +483,7 @@ def test_concealed_gang_is_hidden_from_other_players_public_view() -> None:
     client.post(f"/rooms/{room_id}/start", json={"player_id": "p1"})
     room = room_manager.get_room(room_id)
     assert room.game_state is not None
+    room.game_state.phase = "playing"
     tile = Tile("wan", 1)
     room.game_state.players["p1"].hand = [
         tile,
@@ -572,6 +581,7 @@ def test_ron_hu_uses_last_discard_and_existing_melds() -> None:
     client.post(f"/rooms/{room_id}/start", json={"player_id": "p1"})
     room = room_manager.get_room(room_id)
     assert room.game_state is not None
+    room.game_state.phase = "playing"
     for player in room.game_state.players.values():
         player.skills = []
     win_tile = Tile("wan", 9)
@@ -643,17 +653,18 @@ def test_websocket_reconnect_gets_latest_private_state() -> None:
     client.post(f"/rooms/{room_id}/start", json={"player_id": "p1"})
     room = room_manager.get_room(room_id)
     assert room.game_state is not None
-    room.game_state.players["p1"].skills = ["peek_wall"]
+    room.game_state.phase = "playing"
+    room.game_state.players["p1"].skills = ["astrology", "wish_tile"]
     client.post(
         f"/rooms/{room_id}/actions",
-        json={"player_id": "p1", "type": "use_skill", "skill_id": "peek_wall"},
+        json={"player_id": "p1", "type": "use_skill", "skill_id": "astrology"},
     )
 
     with client.websocket_connect(f"/ws/rooms/{room_id}?viewer_id=p1") as websocket:
         body = websocket.receive_json()
 
     assert body["status"] == "playing"
-    assert len(body["private_data"]["peek_wall"]) == 3
+    assert len(body["private_data"]["private_skill_results"][-1]["tiles"]) == 4
 
 
 def test_new_websocket_sends_wrapped_initial_state() -> None:
@@ -686,6 +697,9 @@ def test_new_websocket_discard_broadcasts_state() -> None:
     client = TestClient(create_app())
     room_id = create_full_room(client)
     client.post(f"/rooms/{room_id}/start", json={"player_id": "p1"})
+    room = room_manager.get_room(room_id)
+    assert room.game_state is not None
+    room.game_state.phase = "playing"
     before = client.get(f"/rooms/{room_id}/state", params={"viewer_id": "p1"}).json()
     tile = before["players"][0]["hand"][0]
 

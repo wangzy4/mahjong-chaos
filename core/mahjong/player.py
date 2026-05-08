@@ -10,6 +10,7 @@ class Meld:
     from_player_id: str | None = None
     claimed_tile: Tile | None = None
     concealed: bool = False
+    stolen: bool = False
 
 
 @dataclass(slots=True)
@@ -19,6 +20,10 @@ class PlayerState:
     hand: list[Tile] = field(default_factory=list)
     discard_pile: list[Tile] = field(default_factory=list)
     melds: list[Meld] = field(default_factory=list)
+    skill_candidates: list[str] = field(default_factory=list)
     skills: list[str] = field(default_factory=list)
+    skill_usage: dict[str, int] = field(default_factory=dict)
+    skill_cooldowns: dict[str, int] = field(default_factory=dict)
+    private_skill_results: list[dict] = field(default_factory=list)
     is_dealer: bool = False
     auto_sort_hand: bool = True

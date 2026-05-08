@@ -28,6 +28,11 @@ class GameState:
     action_log: list[dict] = field(default_factory=list)
     skill_usage: dict[str, dict[str, SkillUseRecord]] = field(default_factory=dict)
     private_data: dict[str, dict[str, object]] = field(default_factory=dict)
+    turn_counts: dict[str, int] = field(default_factory=dict)
+    player_effects: dict[str, list[dict]] = field(default_factory=dict)
+    concealed_gang_locks: dict[str, bool] = field(default_factory=dict)
+    river_recycle_usage: dict[str, dict[str, int]] = field(default_factory=dict)
+    pending_action: dict | None = None
     scores: dict[str, int] = field(default_factory=dict)
     round_score_delta: dict[str, int] = field(default_factory=dict)
     score_events: list[dict] = field(default_factory=list)

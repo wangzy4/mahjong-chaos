@@ -10,17 +10,69 @@
     <main>
       <h1>老千麻将</h1>
 
+      <section class="panel notice">
+        <strong>新玩家提示：</strong>
+        加入房间后请先点“准备”，再点“连接/重连”。刷新页面会保留本窗口的玩家 ID、昵称和房间号，并自动尝试恢复连接。
+        <button id="toggleManual" type="button">查看说明书</button>
+      </section>
+
+      <section id="manualPanel" class="panel guide hidden">
+        <h2>说明书</h2>
+        <nav class="manual-tabs">
+          <button type="button" data-manual-tab="operate">怎么操作</button>
+          <button type="button" data-manual-tab="rules">麻将规则和点数</button>
+          <button type="button" data-manual-tab="skills">技能大全</button>
+        </nav>
+
+        <div id="manualOperate" class="manual-page">
+          <h3>怎么操作</h3>
+          <ol>
+            <li>输入昵称，创建房间或用朋友分享链接自动带入房间号后加入。</li>
+            <li>同一台电脑开多个窗口测试时，每个窗口使用不同玩家 ID。可以手动修改，也可以点“生成新玩家 ID”。</li>
+            <li>加入后先点“准备”，再点“连接/重连”。连接后才能实时收到牌局状态。</li>
+            <li>房主点“开始游戏”。人数不足 4 人时会弹出少人开局确认。</li>
+            <li>开局先进入技能选择阶段，每个人从 3 个候选技能里同步选择 2 个。所有人选完后正式开始。</li>
+            <li>轮到你时系统会自动摸牌。你可以点击手牌后出牌，也可以胡牌、吃碰杠、过，或者使用技能。</li>
+            <li>吃牌时先点“吃”，再点两张自己的手牌。不合法会提示重选。</li>
+            <li>刷新页面后，如果房间还在，会自动恢复本窗口身份并尝试重连。</li>
+          </ol>
+        </div>
+
+        <div id="manualRules" class="manual-page hidden">
+          <h3>麻将规则和点数计算</h3>
+          <ul>
+            <li>只使用万、条、筒三种牌，1 到 9 各 4 张，共 108 张。</li>
+            <li>支持 2 到 4 人开局。少于 4 人时，必须房主确认。</li>
+            <li>支持摸牌、出牌、吃、碰、暗杠、明杠、补杠、自摸胡和点炮胡。</li>
+            <li>胡牌支持标准 4 面子 + 1 雀头，也支持七小对。</li>
+            <li>别人打出的牌按“胡、杠、碰、吃”优先级处理。同优先级暂时先到先得。</li>
+            <li>番型：门前清 x2，清一色 x2，碰碰胡 x2，七小对 x4。番型乘法叠加，不封顶。</li>
+            <li>七小对已经包含门前清收益，所以七小对不会额外叠加门前清。</li>
+            <li>点炮基础为 3 分，自摸基础为每家支付 2 分。庄家赢或庄家输，对对应付款边加倍。</li>
+            <li>暗杠基础每家 2 分，明杠点杠者支付 3 分，补杠每家 1 分。杠分只受庄家倍率影响。</li>
+            <li>所有分数变化必须总和为 0。服务端权威结算，客户端不能改手牌、牌墙或分数。</li>
+          </ul>
+        </div>
+
+        <div id="manualSkills" class="manual-page hidden">
+          <h3>技能大全</h3>
+          <div id="skillManualList" class="skill-list"></div>
+        </div>
+      </section>
+
       <section class="panel">
+        <label>玩家 ID <input id="playerIdInput" /></label>
+        <button id="newPlayerId" type="button">生成新玩家 ID</button>
         <label>昵称 <input id="playerName" placeholder="输入昵称" /></label>
         <label>房间号 <input id="roomId" placeholder="例如 AB12CD" /></label>
         <div class="actions">
-          <button id="createRoom">创建房间</button>
-          <button id="joinRoom">加入房间</button>
-          <button id="readyRoom">准备</button>
-          <button id="startGame">开始游戏</button>
-          <button id="connectWs">连接/重连</button>
+          <button id="createRoom" type="button">创建房间</button>
+          <button id="joinRoom" type="button">加入房间</button>
+          <button id="readyRoom" type="button">准备</button>
+          <button id="startGame" type="button">开始游戏</button>
+          <button id="connectWs" type="button">连接/重连</button>
         </div>
-        <div>我的玩家 ID：<code id="playerIdText"></code></div>
+        <div class="hint">提示：同一台电脑开多个窗口测试时，每个窗口请使用不同玩家 ID。</div>
         <div>连接状态：<span id="wsStatus">未连接</span></div>
         <div id="message"></div>
       </section>
@@ -29,7 +81,7 @@
         <h2>分享房间</h2>
         <div>房间号：<strong id="roomIdText">-</strong></div>
         <input id="shareLink" readonly placeholder="创建或加入房间后生成" />
-        <button id="copyShareLink">复制房间链接</button>
+        <button id="copyShareLink" type="button">复制房间链接</button>
       </section>
 
       <section class="panel">
@@ -43,15 +95,22 @@
       </section>
 
       <section class="panel">
+        <h2>技能选择</h2>
+        <div id="skillSelectionHint">开局后会出现 3 个候选技能，请选择 2 个。</div>
+        <div id="skillCandidates" class="skill-list"></div>
+        <button id="selectSkills" type="button">确认选择技能</button>
+      </section>
+
+      <section class="panel">
         <h2>我的手牌</h2>
         <div id="hand" class="hand"></div>
         <div class="actions">
-          <button id="discardTile">打出选中牌</button>
-          <button id="declareHu">胡牌</button>
-          <button id="huOnDiscard">点炮胡</button>
-          <button id="chiTile">吃</button>
-          <button id="pengTile">碰</button>
-          <button id="passAction">过</button>
+          <button id="discardTile" type="button">打出选中牌</button>
+          <button id="declareHu" type="button">自摸胡</button>
+          <button id="huOnDiscard" type="button">点炮胡</button>
+          <button id="chiTile" type="button">吃</button>
+          <button id="pengTile" type="button">碰</button>
+          <button id="passAction" type="button">过</button>
         </div>
       </section>
 
@@ -65,11 +124,20 @@
             <option value="added_gang">补杠</option>
           </select>
         </label>
-        <label>杠牌 <input id="gangTileValue" placeholder="1万" /></label>
-        <button id="gangTile">开杠</button>
-        <button id="usePeekWall">使用窥视牌墙</button>
-        <label>封印目标 <input id="sealPengTarget" placeholder="玩家 ID" /></label>
-        <button id="useSealPeng">使用封印碰牌</button>
+        <label>杠牌 <input id="gangTileValue" placeholder="例如 1万" /></label>
+        <button id="gangTile" type="button">开杠</button>
+
+        <h3>使用技能</h3>
+        <label>
+          选择技能
+          <select id="skillSelect"></select>
+        </label>
+        <div id="skillUseHelp" class="skill-help">选择技能后会显示中文说明和参数示例。</div>
+        <label>
+          技能参数 JSON
+          <textarea id="skillParamsInput" rows="4" placeholder='例如 {"tile":"5筒"}'></textarea>
+        </label>
+        <button id="useSkill" type="button">使用技能</button>
       </section>
 
       <section class="panel">
@@ -78,12 +146,12 @@
       </section>
 
       <section class="panel">
-        <h2>分数与技能</h2>
-        <div>技能：<span id="skills">-</span></div>
+        <h2>分数与技能结果</h2>
+        <div>我的技能：<span id="skills">-</span></div>
         <div>累计分：<span id="scores">-</span></div>
         <div>本局变化：<span id="roundScoreDelta">-</span></div>
         <div>结算：<span id="settlementSummary">-</span></div>
-        <div>窥视牌墙：<span id="peekWall">-</span></div>
+        <div>私有技能结果：<pre id="privateSkillResults">-</pre></div>
       </section>
 
       <section class="panel">

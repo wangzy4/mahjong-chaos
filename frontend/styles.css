@@ -22,6 +22,22 @@ main {
   background: #fff;
 }
 
+.guide {
+  border-color: #9bb7ff;
+  background: #f7faff;
+}
+
+.notice {
+  border-color: #7aa7ff;
+  background: #eef5ff;
+}
+
+.guide ol,
+.guide ul {
+  margin: 8px 0 8px 24px;
+  padding: 0;
+}
+
 label {
   display: block;
   margin: 8px 0;
@@ -29,11 +45,17 @@ label {
 
 input,
 select,
-button {
+button,
+textarea {
   min-height: 42px;
   margin: 4px;
   padding: 8px 10px;
   font-size: 16px;
+}
+
+textarea {
+  width: min(100%, 620px);
+  font-family: Consolas, monospace;
 }
 
 button {
@@ -45,6 +67,54 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 4px;
+}
+
+.hint,
+.skill-help,
+.skill-meta {
+  color: #555;
+}
+
+.hidden {
+  display: none;
+}
+
+.manual-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 8px 0;
+}
+
+.skill-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+}
+
+.skill-card {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 10px;
+  border: 1px solid #d7d7d7;
+  background: #fff;
+}
+
+.skill-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.manual-skill {
+  display: block;
+}
+
+.player-row {
+  padding: 6px 0;
+  border-bottom: 1px solid #eee;
 }
 
 .hand {

@@ -4,10 +4,12 @@ from uuid import uuid4
 from backend.app.rooms.room import Room
 from core.mahjong.actions import (
     chi_tile,
+    confirm_discard,
     discard_tile,
     gang_tile,
     pass_peng,
     peng_tile,
+    select_skills,
     use_skill,
 )
 from core.mahjong.actions import (
@@ -143,9 +145,7 @@ class RoomManager:
             player_ids=player_ids,
             player_names=room.players,
         )
-        for player in state.players.values():
-            player.skills.append(self._random.choice(skills).id)
-
+        self._assign_starting_skills(state, skills)
         room.game_state = state
         room.status = "playing"
         room.ready_player_ids.clear()
@@ -255,6 +255,20 @@ class RoomManager:
                     gang_type,
                     _action_tile(action),
                 )
+            elif action_type == "select_skills":
+                skill_ids = action.get("skill_ids")
+                if not isinstance(skill_ids, list):
+                    raise InvalidActionError("缺少要选择的技能列表")
+                room.game_state = select_skills(
+                    room.game_state,
+                    player_id,
+                    [str(skill_id) for skill_id in skill_ids],
+                )
+            elif action_type == "confirm_discard":
+                confirm = action.get("confirm")
+                if not isinstance(confirm, bool):
+                    raise InvalidActionError("缺少确认结果")
+                room.game_state = confirm_discard(room.game_state, player_id, confirm)
             elif action_type == "pass_peng":
                 room.game_state = pass_peng(room.game_state, player_id)
             elif action_type == "pass":
@@ -435,9 +449,7 @@ class RoomManager:
                 for player_id in state.player_order
             }
             state.round_score_delta = {player_id: 0 for player_id in state.player_order}
-        for player in state.players.values():
-            player.skills.append(self._random.choice(skills).id)
-
+        self._assign_starting_skills(state, skills)
         state.action_log.append(
             {
                 "type": "restart_game",
@@ -449,6 +461,16 @@ class RoomManager:
         room.status = "playing"
         room.ready_player_ids.clear()
         return room
+
+    def _assign_starting_skills(self, state, skills) -> None:
+        if len(skills) < 3:
+            for player in state.players.values():
+                player.skills = [skill.id for skill in skills]
+            state.phase = "playing"
+            return
+        for player in state.players.values():
+            player.skill_candidates = [skill.id for skill in self._random.sample(skills, k=3)]
+        state.phase = "skill_selection"
 
 
 def _action_tile(action: dict) -> Tile:

@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, status
@@ -18,7 +17,7 @@ from backend.app.websocket.connection_manager import ConnectionManager
 from core.mahjong.game_state import GameState
 from core.mahjong.hu_checker import can_hu_with_melds
 from core.mahjong.tile import tile_to_str
-from core.skills.registry import SkillRegistry
+from core.skills.new_skills import create_skill_registry
 
 
 class CreateRoomRequest(BaseModel):
@@ -127,6 +126,8 @@ class ActionRequest(BaseModel):
         title="操作参数",
         description="技能等扩展操作的参数。",
     )
+    skill_ids: list[str] | None = Field(default=None, title="选择的技能 ID")
+    confirm: bool | None = Field(default=None, title="确认结果")
 
     model_config = {
         "json_schema_extra": {
@@ -150,85 +151,8 @@ class AutoSortHandRequest(BaseModel):
     }
 
 
-@dataclass(frozen=True, slots=True)
-class PeekWallSkill:
-    id: str = "peek_wall"
-    name: str = "窥视牌墙"
-    description: str = "查看牌墙顶 3 张牌，只对自己可见。"
-    timing: str = "manual"
-    max_uses_per_game: int = 1
-
-    def can_use(self, state: GameState, player_id: str, params: dict[str, object]) -> bool:
-        return bool(state.wall)
-
-    def apply(self, state: GameState, player_id: str, params: dict[str, object]) -> GameState:
-        peeked_tiles = [tile_to_str(tile) for tile in state.wall[-3:]]
-        state.private_data.setdefault(player_id, {})["peek_wall"] = peeked_tiles
-        state.action_log.append(
-            {
-                "type": "peek_wall_result",
-                "player_id": player_id,
-                "count": len(peeked_tiles),
-            }
-        )
-        return state
-
-
-@dataclass(frozen=True, slots=True)
-class SealPengSkill:
-    id: str = "seal_peng"
-    name: str = "封印碰牌"
-    description: str = "封印一名玩家的下一次碰牌机会。"
-    timing: str = "manual"
-    max_uses_per_game: int = 1
-
-    def can_use(self, state: GameState, player_id: str, params: dict[str, object]) -> bool:
-        target_player_id = params.get("target_player_id")
-        return isinstance(target_player_id, str) and target_player_id in state.players
-
-    def apply(self, state: GameState, player_id: str, params: dict[str, object]) -> GameState:
-        target_player_id = params["target_player_id"]
-        if not isinstance(target_player_id, str):
-            return state
-        state.sealed_peng_player_ids.add(target_player_id)
-        state.action_log.append(
-            {
-                "type": "seal_peng_applied",
-                "player_id": player_id,
-                "target_player_id": target_player_id,
-            }
-        )
-        return state
-
-
-@dataclass(frozen=True, slots=True)
-class DoubleScoreSkill:
-    id: str = "double_score"
-    name: str = "豪赌"
-    description: str = "胡牌或点炮时结算翻倍，杠分不受影响。"
-    timing: str = "passive"
-    max_uses_per_game: int = 1
-
-    def can_use(self, state: GameState, player_id: str, params: dict[str, object]) -> bool:
-        return player_id in state.players
-
-    def apply(self, state: GameState, player_id: str, params: dict[str, object]) -> GameState:
-        state.private_data.setdefault(player_id, {})["double_score"] = True
-        state.action_log.append(
-            {
-                "type": "double_score_applied",
-                "player_id": player_id,
-            }
-        )
-        return state
-
-
 def create_default_room_manager() -> RoomManager:
-    registry = SkillRegistry()
-    registry.register(PeekWallSkill())
-    registry.register(SealPengSkill())
-    registry.register(DoubleScoreSkill())
-    return RoomManager(registry=registry, seed=1)
+    return RoomManager(registry=create_skill_registry(), seed=1)
 
 
 room_manager = create_default_room_manager()
@@ -256,6 +180,11 @@ PUBLIC_ACTION_LOG_KEYS = {
     "meld_count",
     "reason",
     "target_player_id",
+    "selected_count",
+    "reflected_player_id",
+    "reflected_skill_id",
+    "confirm",
+    "source",
     "tiles",
     "from_player_id",
     "claimed_tile",
@@ -274,6 +203,9 @@ PUBLIC_ACTION_LOG_KEYS = {
     "fan_multiplier",
     "dealer_multiplier",
     "double_score_multiplier",
+    "skill_multipliers",
+    "skill_multiplier",
+    "total_multiplier",
     "multiplier",
     "payments",
     "delta",
@@ -398,6 +330,10 @@ async def handle_room_action(room_id: str, request: ActionRequest) -> dict[str, 
         action["skill_id"] = request.skill_id
     if request.params:
         action["params"] = request.params
+    if request.skill_ids is not None:
+        action["skill_ids"] = request.skill_ids
+    if request.confirm is not None:
+        action["confirm"] = request.confirm
 
     try:
         room = room_manager.handle_action(room_id, request.player_id, action)
@@ -565,7 +501,7 @@ def _ws_message_to_action(message: dict[str, Any]) -> dict[str, Any]:
         raise InvalidActionError("WebSocket payload 必须是对象")
 
     action: dict[str, Any] = {"type": action_type}
-    for key in ("tile", "tiles", "gang_type", "skill_id", "params"):
+    for key in ("tile", "tiles", "gang_type", "skill_id", "params", "skill_ids", "confirm"):
         if key in payload:
             action[key] = payload[key]
     return action
@@ -646,6 +582,7 @@ def _public_room_view(room: Room, viewer_id: str) -> dict[str, Any]:
             for player_id in state.player_order
         ],
         "private_data": dict(state.private_data.get(viewer_id, {})),
+        "pending_discard_confirmation": _pending_discard_confirmation_view(state, viewer_id),
         "action_log": _public_action_log(state.action_log),
     }
 
@@ -671,12 +608,33 @@ def _public_player_view(
         "discard_pile": [tile_to_str(tile) for tile in player.discard_pile],
         "melds": [_public_meld_view(meld, is_viewer) for meld in player.melds],
         "meld_count": len(player.melds),
-        "skills": list(player.skills) if is_viewer else [],
+        "skills": list(player.skills) if is_viewer or state.phase == "playing" else [],
+        "skill_candidates": list(player.skill_candidates) if is_viewer else [],
+        "skill_selected": len(player.skills) == 2,
+        "private_skill_results": list(player.private_skill_results) if is_viewer else [],
         "auto_sort_hand": player.auto_sort_hand if is_viewer else None,
     }
     if is_viewer:
         view["hand"] = [tile_to_str(tile) for tile in player.hand]
     return view
+
+
+def _pending_discard_confirmation_view(
+    state: GameState,
+    viewer_id: str,
+) -> dict[str, Any] | None:
+    if state.pending_action is None:
+        return None
+    if state.pending_action.get("type") != "confirm_dangerous_discard":
+        return None
+    if state.pending_action.get("player_id") != viewer_id:
+        return None
+    tile = state.pending_action.get("tile")
+    return {
+        "type": "confirm_dangerous_discard",
+        "tile": tile_to_str(tile) if tile else None,
+        "message": "这张牌可能点炮，是否仍然打出？",
+    }
 
 
 def _pending_peng_view(state: GameState, viewer_id: str) -> dict[str, Any] | None:
