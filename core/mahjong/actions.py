@@ -393,7 +393,7 @@ def use_skill(
         return reflected_state
 
     if not skill.can_use(state, player_id, params):
-        raise ValueError("当前不能使用这个技能")
+        raise ValueError(_skill_unavailable_message(state, player_id, skill_id))
 
     next_state = skill.apply(deepcopy(state), player_id, params)
     player_usage = next_state.skill_usage.setdefault(player_id, {})
@@ -693,6 +693,29 @@ def _should_warn_dangerous_discard(state: GameState, player_id: str, tile: Tile)
         if can_hu_with_melds([*other_player.hand, tile], other_player.melds):
             return True
     return False
+
+
+def _skill_unavailable_message(state: GameState, player_id: str, skill_id: str) -> str:
+    if skill_id in {"astrology", "peek_neighbor", "change_suit"}:
+        if state.phase != "playing":
+            return "这个技能只能在正式对局中使用"
+        if state.current_player_id != player_id:
+            return f"这个技能只能在自己回合使用，当前轮到：{state.current_player_id}"
+        last_used = state.players[player_id].skill_cooldowns.get(skill_id)
+        if last_used is not None and state.turn_counts.get(player_id, 0) - last_used < 4:
+            remaining = 4 - (state.turn_counts.get(player_id, 0) - last_used)
+            return f"这个技能四巡一次，还需要再完成 {remaining} 次自己的回合"
+    if skill_id == "wish_tile":
+        if state.current_player_id != player_id:
+            return f"自行印牌只能在自己摸牌前使用，当前轮到：{state.current_player_id}"
+        if state.current_turn_has_drawn:
+            return "自行印牌需要在摸牌前使用；当前已经摸过牌"
+    if skill_id == "recycle_river":
+        if state.current_player_id != player_id:
+            return f"回收牌河只能在自己摸牌前使用，当前轮到：{state.current_player_id}"
+        if state.current_turn_has_drawn:
+            return "回收牌河需要在摸牌前使用；当前已经摸过牌"
+    return "当前不能使用这个技能，请检查是否轮到你、是否在冷却中、参数是否正确"
 
 
 def _try_reflect_target_skill(

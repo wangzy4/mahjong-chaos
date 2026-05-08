@@ -8,6 +8,7 @@ let activeManualTab = "operate";
 let manualOpen = false;
 let reconnectTimer = null;
 let currentParamTemplateSkillId = null;
+let lastPrivateResultCount = 0;
 
 const $ = (id) => document.getElementById(id);
 
@@ -340,9 +341,10 @@ function renderState(state) {
   $("scores").textContent = formatMap(state.scores);
   $("roundScoreDelta").textContent = formatMap(state.round_score_delta);
   $("settlementSummary").textContent = state.settlement_summary?.message || "-";
-  $("privateSkillResults").textContent = formatPrivateSkillResults(
-    currentViewer(state)?.private_skill_results || state.private_data?.private_skill_results || [],
-  );
+  const privateResults =
+    currentViewer(state)?.private_skill_results || state.private_data?.private_skill_results || [];
+  $("privateSkillResults").textContent = formatPrivateSkillResults(privateResults);
+  notifyNewPrivateSkillResult(privateResults);
   renderSkillSelection(state);
   renderSkillUsePanel(state);
   $("actionLog").textContent = formatActionLog(state.action_log || []);
@@ -562,14 +564,54 @@ function formatPrivateSkillResults(results) {
   if (!results || results.length === 0) {
     return "-";
   }
-  return JSON.stringify(
-    results.map((result) => ({
-      ...result,
-      type_label: skillInfo(result.type).name || result.type,
-    })),
-    null,
-    2,
-  );
+  return results.map(formatPrivateSkillResult).join("\n");
+}
+
+function formatPrivateSkillResult(result) {
+  const skillName = skillInfo(result.type).name || result.type;
+  if (result.type === "astrology") {
+    return `观星：牌墙顶 ${result.tiles?.length || 0} 张是 ${formatTiles(result.tiles)}。`;
+  }
+  if (result.type === "peek_neighbor") {
+    return `偷窥：看到玩家 ${result.target_player_id} 的 ${formatTiles(result.tiles)}。`;
+  }
+  if (result.type === "swap_with_neighbor") {
+    return `偷天换日：你获得了 ${result.gained_tile || "-"}。`;
+  }
+  if (result.type === "change_suit") {
+    return `换色：${result.from_tile || "-"} 换成了 ${result.to_tile || "-"}。`;
+  }
+  if (result.type === "steal_concealed_gang") {
+    return `偷暗杠：你从玩家 ${result.target_player_id} 的暗杠里偷到了 ${result.stolen_tile || "-"}。`;
+  }
+  if (result.type === "wish_tile") {
+    return `自行印牌：许愿 ${result.wished_tile || "-"}，${
+      result.success ? "成功" : "失败后改为正常摸牌"
+    }，摸到 ${result.drawn_tile || "-"}。`;
+  }
+  if (result.type === "killing_intent_sense") {
+    return `杀意感知：${result.message || ""} ${result.tile || ""}`;
+  }
+  if (result.message) {
+    return `${skillName}：${result.message}`;
+  }
+  return `${skillName}：${JSON.stringify(result)}`;
+}
+
+function notifyNewPrivateSkillResult(results) {
+  if (!results || results.length <= lastPrivateResultCount) {
+    lastPrivateResultCount = results?.length || 0;
+    return;
+  }
+  const latest = results[results.length - 1];
+  lastPrivateResultCount = results.length;
+  if (latest?.type === "astrology") {
+    showMessage(`观星成功：牌墙顶 ${latest.tiles?.length || 0} 张是 ${formatTiles(latest.tiles)}。`);
+  }
+}
+
+function formatTiles(tiles) {
+  return tiles && tiles.length ? tiles.join("、") : "-";
 }
 
 function formatActionLog(actionLog) {
