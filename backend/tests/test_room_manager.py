@@ -2,7 +2,12 @@ from dataclasses import dataclass
 
 import pytest
 
-from backend.app.rooms.manager import InvalidActionError, RoomFullError, RoomManager
+from backend.app.rooms.manager import (
+    InvalidActionError,
+    PlayerNotInRoomError,
+    RoomFullError,
+    RoomManager,
+)
 from core.mahjong.game_state import GameState
 from core.mahjong.tile import Tile, sort_tiles
 from core.skills.registry import SkillRegistry
@@ -64,6 +69,70 @@ def test_join_room_fails_when_room_has_more_than_four_players() -> None:
 
     with pytest.raises(RoomFullError):
         manager.join_room(room_id, "p5", "白板")
+
+
+def test_leave_room_removes_player_while_waiting() -> None:
+    manager = make_manager()
+    room_id = fill_room(manager)
+
+    room = manager.leave_room(room_id, "p2")
+
+    assert "p2" not in room.players
+    assert len(room.players) == 3
+
+
+def test_host_leave_transfers_host_to_next_player() -> None:
+    manager = make_manager()
+    room_id = fill_room(manager)
+
+    room = manager.leave_room(room_id, "p1")
+
+    assert "p1" not in room.players
+    assert room.host_player_id == "p2"
+
+
+def test_leave_room_rejects_during_game() -> None:
+    manager = make_manager()
+    room_id = fill_room(manager)
+    manager.start_game(room_id, "p1")
+
+    with pytest.raises(InvalidActionError, match="游戏进行中"):
+        manager.leave_room(room_id, "p2")
+
+
+def test_host_can_kick_member_while_waiting() -> None:
+    manager = make_manager()
+    room_id = fill_room(manager)
+
+    room = manager.kick_player(room_id, "p1", "p3")
+
+    assert "p3" not in room.players
+    assert len(room.players) == 3
+
+
+def test_non_host_cannot_kick_member() -> None:
+    manager = make_manager()
+    room_id = fill_room(manager)
+
+    with pytest.raises(InvalidActionError, match="只有房主"):
+        manager.kick_player(room_id, "p2", "p3")
+
+
+def test_kick_rejects_missing_player() -> None:
+    manager = make_manager()
+    room_id = fill_room(manager)
+
+    with pytest.raises(PlayerNotInRoomError):
+        manager.kick_player(room_id, "p1", "p5")
+
+
+def test_kick_rejects_during_game() -> None:
+    manager = make_manager()
+    room_id = fill_room(manager)
+    manager.start_game(room_id, "p1")
+
+    with pytest.raises(InvalidActionError, match="游戏进行中"):
+        manager.kick_player(room_id, "p1", "p2")
 
 
 def test_start_game_fails_with_one_player() -> None:

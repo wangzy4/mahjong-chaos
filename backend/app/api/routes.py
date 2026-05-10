@@ -79,6 +79,17 @@ class ReadyRoomRequest(PlayerRoomRequest):
     )
 
 
+class KickRoomRequest(BaseModel):
+    player_id: str = Field(min_length=1, title="房主玩家 ID", description="执行踢人的房主玩家 ID。")
+    target_player_id: str = Field(min_length=1, title="目标玩家 ID", description="要踢出房间的玩家 ID。")
+
+    model_config = {
+        "json_schema_extra": {
+            "examples": [{"player_id": "p1", "target_player_id": "p2"}],
+        },
+    }
+
+
 class RestartRoomRequest(BaseModel):
     player_id: str = Field(min_length=1, title="玩家 ID", description="执行重新开始的房主玩家 ID。")
     confirm_underfilled: bool = Field(
@@ -286,6 +297,62 @@ async def ready_for_next_game(room_id: str, request: ReadyRoomRequest) -> dict[s
     except InvalidActionError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
+    await _broadcast_room_public_views(room)
+    return _public_room_view(room, request.player_id)
+
+
+@router.post(
+    "/rooms/{room_id}/leave",
+    summary="离开房间",
+    description="玩家离开等待中或已结束的房间。对局进行中不能离开，以免破坏牌局状态。",
+)
+async def leave_room(room_id: str, request: PlayerRoomRequest) -> dict[str, Any]:
+    try:
+        room = room_manager.leave_room(room_id, request.player_id)
+    except RoomNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PlayerNotInRoomError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except InvalidActionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    websocket_hub.disconnect(room_id, request.player_id)
+    await websocket_hub.broadcast_room(
+        room_id,
+        lambda _viewer_id: {"type": "system", "message": f"玩家 {request.player_id} 已离开房间"},
+    )
+    await _broadcast_room_public_views(room)
+    return {"room_id": room_id, "left": True, "player_id": request.player_id}
+
+
+@router.post(
+    "/rooms/{room_id}/kick",
+    summary="踢出房间成员",
+    description="房主可以在等待中或已结束时踢出成员。对局进行中不能踢人。",
+)
+async def kick_player(room_id: str, request: KickRoomRequest) -> dict[str, Any]:
+    try:
+        room = room_manager.kick_player(room_id, request.player_id, request.target_player_id)
+    except RoomNotFoundError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    except PlayerNotInRoomError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+    except InvalidActionError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    await websocket_hub.send_to_player(
+        room_id,
+        request.target_player_id,
+        {"type": "system", "message": "你已被房主踢出房间"},
+    )
+    websocket_hub.disconnect(room_id, request.target_player_id)
+    await websocket_hub.broadcast_room(
+        room_id,
+        lambda _viewer_id: {
+            "type": "system",
+            "message": f"房主已将玩家 {request.target_player_id} 踢出房间",
+        },
+    )
     await _broadcast_room_public_views(room)
     return _public_room_view(room, request.player_id)
 
@@ -613,6 +680,9 @@ def _public_player_view(
         "skill_selected": len(player.skills) == 2,
         "private_skill_results": list(player.private_skill_results) if is_viewer else [],
         "auto_sort_hand": player.auto_sort_hand if is_viewer else None,
+        "skill_usage": dict(player.skill_usage) if is_viewer else {},
+        "skill_cooldowns": dict(player.skill_cooldowns) if is_viewer else {},
+        "turn_count": state.turn_counts.get(player_id, 0) if is_viewer else None,
     }
     if is_viewer:
         view["hand"] = [tile_to_str(tile) for tile in player.hand]

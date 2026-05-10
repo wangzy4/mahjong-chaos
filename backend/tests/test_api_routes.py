@@ -48,6 +48,63 @@ def test_join_room_api() -> None:
     }
 
 
+def test_join_room_api_rejects_fifth_player() -> None:
+    client = TestClient(create_app())
+    room_id = create_full_room(client)
+
+    response = client.post(f"/rooms/{room_id}/join", json={"player_id": "p5", "name": "Eve"})
+
+    assert response.status_code == 409
+    assert "房间已满" in response.json()["detail"]
+
+
+def test_leave_room_api_removes_player() -> None:
+    client = TestClient(create_app())
+    room_id = create_full_room(client)
+
+    response = client.post(f"/rooms/{room_id}/leave", json={"player_id": "p2"})
+    state_response = client.get(f"/rooms/{room_id}/state", params={"viewer_id": "p1"})
+
+    assert response.status_code == 200
+    assert response.json()["left"] is True
+    assert state_response.status_code == 200
+    assert [player["player_id"] for player in state_response.json()["players"]] == [
+        "p1",
+        "p3",
+        "p4",
+    ]
+
+
+def test_host_can_kick_player_api() -> None:
+    client = TestClient(create_app())
+    room_id = create_full_room(client)
+
+    response = client.post(
+        f"/rooms/{room_id}/kick",
+        json={"player_id": "p1", "target_player_id": "p3"},
+    )
+
+    assert response.status_code == 200
+    assert [player["player_id"] for player in response.json()["players"]] == [
+        "p1",
+        "p2",
+        "p4",
+    ]
+
+
+def test_non_host_cannot_kick_player_api() -> None:
+    client = TestClient(create_app())
+    room_id = create_full_room(client)
+
+    response = client.post(
+        f"/rooms/{room_id}/kick",
+        json={"player_id": "p2", "target_player_id": "p3"},
+    )
+
+    assert response.status_code == 400
+    assert "只有房主" in response.json()["detail"]
+
+
 def test_ready_api_marks_waiting_player_ready() -> None:
     client = TestClient(create_app())
     room_id = client.post("/rooms", json={"player_id": "p1", "name": "Alice"}).json()["room_id"]

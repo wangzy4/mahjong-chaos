@@ -84,6 +84,10 @@ class RoomManager:
         room.players[player_id] = player_name
         return room
 
+    def _ensure_room_can_change_members(self, room: Room) -> None:
+        if room.status not in {"waiting", "finished"}:
+            raise InvalidActionError("游戏进行中不能变更房间成员")
+
     def set_ready(self, room_id: str, player_id: str, ready: bool = True) -> Room:
         room = self.get_room(room_id)
         if player_id not in room.players:
@@ -108,11 +112,24 @@ class RoomManager:
         room = self.get_room(room_id)
         if player_id not in room.players:
             raise PlayerNotInRoomError("玩家不在房间内")
-        if room.status != "waiting":
-            raise InvalidActionError("游戏开始后不能离开房间")
+        self._ensure_room_can_change_members(room)
 
-        del room.players[player_id]
-        room.ready_player_ids.discard(player_id)
+        self._remove_player_from_room(room, player_id)
+        return room
+
+    def kick_player(self, room_id: str, host_player_id: str, target_player_id: str) -> Room:
+        room = self.get_room(room_id)
+        if host_player_id not in room.players:
+            raise PlayerNotInRoomError("玩家不在房间内")
+        if target_player_id not in room.players:
+            raise PlayerNotInRoomError("要踢出的玩家不在房间内")
+        if host_player_id != room.host_player_id:
+            raise InvalidActionError("只有房主可以踢出房间成员")
+        if target_player_id == room.host_player_id:
+            raise InvalidActionError("房主不能踢出自己，请使用离开房间")
+        self._ensure_room_can_change_members(room)
+
+        self._remove_player_from_room(room, target_player_id)
         return room
 
     def start_game(self, room_id: str, player_id: str, confirm_underfilled: bool = False) -> Room:
@@ -461,6 +478,26 @@ class RoomManager:
         room.status = "playing"
         room.ready_player_ids.clear()
         return room
+
+    def _remove_player_from_room(self, room: Room, player_id: str) -> None:
+        del room.players[player_id]
+        room.ready_player_ids.discard(player_id)
+        room.connected_player_ids.discard(player_id)
+
+        if room.game_state is not None and room.status == "finished":
+            room.game_state.players.pop(player_id, None)
+            if player_id in room.game_state.player_order:
+                room.game_state.player_order.remove(player_id)
+            room.game_state.scores.pop(player_id, None)
+            room.game_state.round_score_delta.pop(player_id, None)
+            room.game_state.turn_counts.pop(player_id, None)
+            room.game_state.player_effects.pop(player_id, None)
+            room.game_state.river_recycle_usage.pop(player_id, None)
+
+        if player_id == room.host_player_id and room.players:
+            room.host_player_id = next(iter(room.players))
+        if not room.players:
+            self._rooms.pop(room.room_id, None)
 
     def _assign_starting_skills(self, state, skills) -> None:
         if len(skills) < 3:

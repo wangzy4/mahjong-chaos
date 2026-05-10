@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from core.mahjong.game_state import GameState
 from core.mahjong.player import Meld, PlayerState
 from core.mahjong.scoring import apply_delta, calculate_gang_delta
-from core.mahjong.tile import Suit, Tile, parse_tile, sort_tiles, tile_to_str
+from core.mahjong.tile import DISPLAY_TO_SUIT, Suit, Tile, parse_tile, sort_tiles, tile_to_str
 from core.skills.base import Skill
 from core.skills.registry import SkillRegistry
 
@@ -159,7 +159,7 @@ class ChangeSuitSkill(BasicSkill):
     def can_use(self, state: GameState, player_id: str, params: dict[str, object]) -> bool:
         try:
             from_tile = parse_tile(str(params.get("from_tile")))
-            to_suit = Suit(str(params.get("to_suit")))
+            to_suit = _parse_suit_param(params.get("to_suit"))
         except ValueError:
             return False
         target_tile = Tile(to_suit, from_tile.rank)
@@ -173,10 +173,13 @@ class ChangeSuitSkill(BasicSkill):
 
     def apply(self, state: GameState, player_id: str, params: dict[str, object]) -> GameState:
         from_tile = parse_tile(str(params["from_tile"]))
-        to_suit = Suit(str(params["to_suit"]))
+        to_suit = _parse_suit_param(params["to_suit"])
         target_tile = Tile(to_suit, from_tile.rank)
         player = state.players[player_id]
-        player.hand.remove(from_tile)
+        try:
+            player.hand.remove(from_tile)
+        except ValueError as exc:
+            raise ValueError("换色失败：你的手牌里没有这张牌") from exc
         state.wall.remove(target_tile)
         player.hand.append(target_tile)
         state.wall.insert(0, from_tile)
@@ -200,22 +203,28 @@ class ChangeSuitSkill(BasicSkill):
 class StealthGangSkill(BasicSkill):
     def can_use(self, state: GameState, player_id: str, params: dict[str, object]) -> bool:
         try:
-            tile = parse_tile(str(params.get("tile")))
+            triplet_tile = parse_tile(str(params.get("triplet_tile") or params.get("tile")))
+            parse_tile(str(params.get("extra_tile") or params.get("desired_tile")))
         except ValueError:
             return False
         return (
             _is_own_turn(state, player_id)
-            and state.players[player_id].hand.count(tile) >= 3
-            and tile in state.wall
+            and state.players[player_id].hand.count(triplet_tile) >= 3
         )
 
     def apply(self, state: GameState, player_id: str, params: dict[str, object]) -> GameState:
-        tile = parse_tile(str(params["tile"]))
+        triplet_tile = parse_tile(str(params.get("triplet_tile") or params.get("tile")))
+        extra_tile = parse_tile(str(params.get("extra_tile") or params.get("desired_tile")))
         player = state.players[player_id]
         for _ in range(3):
-            player.hand.remove(tile)
-        state.wall.remove(tile)
-        player.melds.append(Meld(type="concealed_gang", tiles=[tile] * 4, concealed=True))
+            player.hand.remove(triplet_tile)
+        player.melds.append(
+            Meld(
+                type="concealed_gang",
+                tiles=[triplet_tile, triplet_tile, triplet_tile, extra_tile],
+                concealed=True,
+            )
+        )
         _sort_hand(player)
         delta, event = calculate_gang_delta(state, player_id, "concealed_gang")
         state = apply_delta(state, delta, event)
@@ -369,8 +378,18 @@ def create_skills() -> list[Skill]:
         ),
         PassiveSkill("killing_intent_sense", "杀意感知", "第一次点炮前提醒", "passive", 1),
         ChangeSuitSkill("change_suit", "换色", "换成同数字另一花色", max_uses_per_game=99),
-        StealthGangSkill("stealth_gang", "偷摸开杠", "三张加牌墙一张形成暗杠"),
-        StealConcealedGangSkill("steal_concealed_gang", "偷暗杠", "替换别人暗杠一张牌"),
+        StealthGangSkill(
+            "stealth_gang",
+            "偷摸开杠",
+            "三张相同手牌加一张指定牌形成暗杠",
+            max_uses_per_game=999999,
+        ),
+        StealConcealedGangSkill(
+            "steal_concealed_gang",
+            "偷暗杠",
+            "替换别人暗杠一张牌",
+            max_uses_per_game=999999,
+        ),
         RecycleRiverSkill("recycle_river", "回收牌河", "从牌河回收一张牌", max_uses_per_game=2),
         WishTileSkill("wish_tile", "自行印牌", "摸牌时许愿一张牌"),
     ]
@@ -381,7 +400,14 @@ def _is_own_turn(state: GameState, player_id: str) -> bool:
 
 
 def _can_replace_draw(state: GameState, player_id: str) -> bool:
-    return _is_own_turn(state, player_id) and not state.current_turn_has_drawn
+    claimable_discard_exists = (
+        state.last_discard is not None and state.last_discard.available_for_claim
+    )
+    return (
+        _is_own_turn(state, player_id)
+        and not state.current_turn_has_drawn
+        and not claimable_discard_exists
+    )
 
 
 def _cooldown_ready(state: GameState, player_id: str, skill_id: str) -> bool:
@@ -402,6 +428,13 @@ def _neighbor_id(state: GameState, player_id: str, params: dict[str, object]) ->
     index = state.player_order.index(player_id)
     offset = -1 if direction == "prev" else 1
     return state.player_order[(index + offset) % len(state.player_order)]
+
+
+def _parse_suit_param(value: object) -> Suit:
+    text = str(value)
+    if text in DISPLAY_TO_SUIT:
+        return DISPLAY_TO_SUIT[text]
+    return Suit(text)
 
 
 def _peek_target_hand(

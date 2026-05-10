@@ -47,6 +47,8 @@ const SKILL_INFO = {
     name: "观星",
     type: "主动信息",
     limit: "四巡一次",
+    cooldownTurns: 4,
+    maxUses: null,
     effect: "查看牌墙顶 4 张牌，不改变牌墙顺序。",
     usage: "自己回合使用，不需要参数。结果只显示给自己。",
     params: "{}",
@@ -55,6 +57,8 @@ const SKILL_INFO = {
     name: "偷窥",
     type: "主动目标",
     limit: "四巡一次",
+    cooldownTurns: 4,
+    maxUses: null,
     effect: "查看上家或下家的随机两张手牌。",
     usage: "自己回合使用。文本框已填好模板，只需要把 target_direction 改成 prev 或 next。",
     params: '{"target_direction":"prev"}',
@@ -63,6 +67,8 @@ const SKILL_INFO = {
     name: "偷天换日",
     type: "主动目标",
     limit: "每局 2 次",
+    cooldownTurns: null,
+    maxUses: 2,
     effect: "你指定给出一张牌，随机获得上家或下家的一张牌。",
     usage: "自己回合使用。文本框已填好模板，只需要改方向和你要交出去的牌名。",
     params: '{"target_direction":"next","give_tile":"3万"}',
@@ -79,22 +85,28 @@ const SKILL_INFO = {
     name: "换色",
     type: "主动改牌",
     limit: "四巡一次",
+    cooldownTurns: 4,
+    maxUses: null,
     effect: "把一张牌换成数字相同的另一花色牌，目标牌必须还在牌墙里。",
-    usage: "自己回合使用。只需要改 from_tile 的牌名和 to_suit 的花色。wan=万，tong=筒，tiao=条。",
-    params: '{"from_tile":"5万","to_suit":"tong"}',
+    usage: "自己回合使用。只需要改 from_tile 的牌名和 to_suit 的中文花色，to_suit 可填 万、筒、条。",
+    params: '{"from_tile":"5万","to_suit":"筒"}',
   },
   stealth_gang: {
     name: "偷摸开杠",
     type: "主动杠",
-    limit: "每局 1 次",
-    effect: "手里有三张相同牌时，从牌墙拿第 4 张，直接形成暗杠并按暗杠结算。",
-    usage: "自己回合使用。只需要把 tile 改成你手里有三张的牌名。",
-    params: '{"tile":"5万"}',
+    limit: "不限次数",
+    cooldownTurns: null,
+    maxUses: null,
+    effect: "手里有三张相同牌时，再指定一张任意想要的牌，直接组成暗杠并按暗杠结算。",
+    usage: "自己回合使用。triplet_tile 填你手里有三张的牌，extra_tile 填你想补成暗杠的那张牌。",
+    params: '{"triplet_tile":"5万","extra_tile":"9筒"}',
   },
   steal_concealed_gang: {
     name: "偷暗杠",
     type: "主动目标",
-    limit: "每局 1 次",
+    limit: "不限次数",
+    cooldownTurns: null,
+    maxUses: null,
     effect: "用自己一张牌替换别人暗杠中的一张真实牌，一个暗杠只能被偷一次。",
     usage: "填写目标玩家 ID，并把 your_tile 改成你要交出去的牌名。target_meld_id 目前不用填。",
     params: '{"target_player_id":"p2","your_tile":"3万"}',
@@ -103,6 +115,8 @@ const SKILL_INFO = {
     name: "回收牌河",
     type: "主动摸牌替代",
     limit: "自己牌河 1 次，别人牌河 1 次",
+    cooldownTurns: null,
+    maxUses: 2,
     effect: "摸牌前改为从牌河拿回一张指定牌。",
     usage: "只需要改来源、目标玩家 ID 和要回收的牌名。source=own 表示自己的牌河，others 表示别人的牌河。",
     params: '{"source":"others","target_player_id":"p2","tile":"3万"}',
@@ -111,6 +125,8 @@ const SKILL_INFO = {
     name: "自行印牌",
     type: "主动摸牌替代",
     limit: "每局 1 次",
+    cooldownTurns: null,
+    maxUses: 1,
     effect: "摸牌前许愿一张牌。牌墙里有就直接拿，没有则消耗技能并正常摸一张。",
     usage: "自己摸牌前使用。只需要把 tile 改成想要的牌名。",
     params: '{"tile":"5筒"}',
@@ -158,8 +174,9 @@ function wsUrl() {
   return `${protocol}://${window.location.host}/ws/${roomId()}/${encodeURIComponent(playerId())}`;
 }
 
-function showMessage(text) {
+function showMessage(text, isError = false) {
   $("message").textContent = text;
+  $("message").classList.toggle("error", isError);
 }
 
 async function request(path, options = {}) {
@@ -227,6 +244,32 @@ async function readyRoom() {
   renderState(body);
 }
 
+async function leaveRoom() {
+  if (!roomId()) {
+    throw new Error("当前没有房间。");
+  }
+  if (!window.confirm("确定要离开当前房间吗？对局进行中不能离开。")) {
+    return;
+  }
+  await request(`/rooms/${roomId()}/leave`, {
+    method: "POST",
+    body: JSON.stringify({ player_id: playerId() }),
+  });
+  clearCurrentRoom("已离开房间。");
+}
+
+async function kickPlayer(targetPlayerId) {
+  if (!window.confirm(`确定要踢出玩家 ${targetPlayerId} 吗？`)) {
+    return;
+  }
+  const body = await request(`/rooms/${roomId()}/kick`, {
+    method: "POST",
+    body: JSON.stringify({ player_id: playerId(), target_player_id: targetPlayerId }),
+  });
+  showMessage(`已踢出玩家 ${targetPlayerId}。`);
+  renderState(body);
+}
+
 async function startGame() {
   await refreshState();
   const playerCount = latestState?.players?.length || 0;
@@ -287,9 +330,12 @@ function connectWebSocket({ silent = false } = {}) {
     if (message.type === "state") {
       renderState(message.data);
     } else if (message.type === "error") {
-      showMessage(message.message);
+      showMessage(message.message, true);
     } else if (message.type === "system") {
       showMessage(message.message);
+      if (message.message?.includes("你已被房主踢出房间")) {
+        clearCurrentRoom(message.message);
+      }
     }
   };
   socket.onclose = (event) => {
@@ -308,6 +354,31 @@ function connectWebSocket({ silent = false } = {}) {
   socket.onerror = () => {
     $("wsStatus").textContent = "连接错误";
   };
+}
+
+function clearCurrentRoom(message) {
+  if (socket) {
+    socket.onclose = null;
+    socket.close();
+    socket = null;
+  }
+  clearTimeout(reconnectTimer);
+  latestState = null;
+  selectedTile = null;
+  chiMode = false;
+  chiSelectedTiles = [];
+  selectedSkillIds = [];
+  sessionStorage.removeItem(STORAGE_KEYS.roomId);
+  $("roomId").value = "";
+  updateShareLink("");
+  $("wsStatus").textContent = "未连接";
+  showMessage(message);
+  renderState({
+    status: "未加入房间",
+    phase: "waiting",
+    players: [],
+    room_id: "",
+  });
 }
 
 async function sendAction(action) {
@@ -421,7 +492,7 @@ function renderSkillUsePanel(state) {
   skills.forEach((skillId) => {
     const option = document.createElement("option");
     option.value = skillId;
-    option.textContent = skillLabel(skillId);
+    option.textContent = `${skillLabel(skillId)} - ${skillStatusText(viewer, skillId)}`;
     select.appendChild(option);
   });
   if (skills.includes(previousValue)) {
@@ -433,7 +504,9 @@ function renderSkillUsePanel(state) {
 function updateSkillUseHelp() {
   const skillId = $("skillSelect").value;
   const info = skillInfo(skillId);
-  $("skillUseHelp").innerHTML = `<strong>${info.name}</strong>（${info.type}，${info.limit}）：${info.effect}<br />使用方式：${info.usage}`;
+  const viewer = latestState ? currentViewer(latestState) : null;
+  const status = viewer ? skillStatusText(viewer, skillId) : info.limit;
+  $("skillUseHelp").innerHTML = `<strong>${info.name}</strong>（${info.type}，${status}）：${info.effect}<br />使用方式：${info.usage}`;
   if (info.params) {
     const template = formatSkillParamsTemplate(info.params);
     $("skillParamsInput").placeholder = template;
@@ -542,11 +615,23 @@ function renderPlayers(state) {
           ? "已选技能"
           : "未选技能"
         : formatSkillNames(player.skills || []);
-    div.textContent = `${player.player_id} ${player.name} ${player.connected ? "在线" : "离线"} ${
+    const playerText = `${player.player_id} ${player.name} ${player.connected ? "在线" : "离线"} ${
       player.ready ? "已准备" : "未准备"
     } ${skillStatus} 手牌:${player.hand_count ?? "-"} 弃牌:${
       (player.discard_pile || []).join("、") || "-"
     } 副露:${melds || "-"}`;
+    div.textContent = playerText;
+    if (
+      state.host_player_id === playerId()
+      && player.player_id !== playerId()
+      && ["waiting", "finished"].includes(state.status)
+    ) {
+      const kickButton = document.createElement("button");
+      kickButton.type = "button";
+      kickButton.textContent = "踢出";
+      kickButton.onclick = () => kickPlayer(player.player_id);
+      div.appendChild(kickButton);
+    }
     $("players").appendChild(div);
   });
 }
@@ -654,8 +739,30 @@ function skillInfo(skillId) {
       effect: "-",
       usage: "-",
       params: "",
+      cooldownTurns: null,
+      maxUses: null,
     }
   );
+}
+
+function skillStatusText(player, skillId) {
+  const info = skillInfo(skillId);
+  const used = player?.skill_usage?.[skillId] || 0;
+  const turnCount = player?.turn_count || 0;
+  if (info.cooldownTurns) {
+    const lastUsedTurn = player?.skill_cooldowns?.[skillId];
+    if (lastUsedTurn === undefined || lastUsedTurn === null) {
+      return `${info.limit}，可使用`;
+    }
+    const passedTurns = turnCount - lastUsedTurn;
+    const remaining = Math.max(0, info.cooldownTurns - passedTurns);
+    return remaining > 0 ? `${info.limit}，冷却中，还差 ${remaining} 次自己回合` : `${info.limit}，可使用`;
+  }
+  if (info.maxUses === null || info.maxUses === undefined) {
+    return used > 0 ? `${info.limit}，已用 ${used} 次` : `${info.limit}，可使用`;
+  }
+  const remainingUses = Math.max(0, info.maxUses - used);
+  return `剩余 ${remainingUses}/${info.maxUses} 次`;
 }
 
 function skillLabel(skillId) {
@@ -778,7 +885,7 @@ function bind(id, handler) {
     try {
       await handler();
     } catch (error) {
-      showMessage(error.message);
+      showMessage(error.message, true);
     }
   };
 }
@@ -788,6 +895,7 @@ bind("joinRoom", joinRoom);
 bind("readyRoom", readyRoom);
 bind("startGame", startGame);
 bind("connectWs", () => connectWebSocket());
+bind("leaveRoom", leaveRoom);
 bind("newPlayerId", () => {
   setPlayerId(makePlayerId());
   showMessage("已生成新的玩家 ID。多窗口测试时，每个窗口都应不同。");

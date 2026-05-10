@@ -148,6 +148,11 @@ button {
   min-height: 24px;
 }
 
+#message.error {
+  color: #d00000;
+  font-weight: bold;
+}
+
 #shareLink {
   width: min(100%, 620px);
 }

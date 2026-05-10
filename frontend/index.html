@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>老千麻将</title>
-    <link rel="stylesheet" href="/styles.css?v=20260508-astrology-result" />
+    <link rel="stylesheet" href="/styles.css?v=20260510-skill-rules" />
   </head>
   <body>
     <main>
@@ -30,7 +30,9 @@
             <li>输入昵称，创建房间或用朋友分享链接自动带入房间号后加入。</li>
             <li>同一台电脑开多个窗口测试时，每个窗口使用不同玩家 ID。可以手动修改，也可以点“生成新玩家 ID”。</li>
             <li>加入后先点“准备”，再点“连接/重连”。连接后才能实时收到牌局状态。</li>
+            <li>房间最多 4 人。等待中或本局结束后可以离开房间；对局进行中不能离开。</li>
             <li>房主点“开始游戏”。人数不足 4 人时会弹出少人开局确认。</li>
+            <li>等待中或本局结束后，房主可以在玩家列表里点击“踢出”移除成员。</li>
             <li>开局先进入技能选择阶段，每个人从 3 个候选技能里同步选择 2 个。所有人选完后正式开始。</li>
             <li>轮到你时系统会自动摸牌。你可以点击手牌后出牌，也可以胡牌、吃碰杠、过，或者使用技能。</li>
             <li>吃牌时先点“吃”，再点两张自己的手牌。不合法会提示重选。</li>
@@ -71,6 +73,7 @@
           <button id="readyRoom" type="button">准备</button>
           <button id="startGame" type="button">开始游戏</button>
           <button id="connectWs" type="button">连接/重连</button>
+          <button id="leaveRoom" type="button">离开房间</button>
         </div>
         <div class="hint">提示：同一台电脑开多个窗口测试时，每个窗口请使用不同玩家 ID。</div>
         <div>连接状态：<span id="wsStatus">未连接</span></div>
@@ -99,6 +102,11 @@
         <div id="skillSelectionHint">开局后会出现 3 个候选技能，请选择 2 个。</div>
         <div id="skillCandidates" class="skill-list"></div>
         <button id="selectSkills" type="button">确认选择技能</button>
+      </section>
+
+      <section class="panel">
+        <h2>玩家</h2>
+        <div id="players"></div>
       </section>
 
       <section class="panel">
@@ -141,11 +149,6 @@
       </section>
 
       <section class="panel">
-        <h2>玩家</h2>
-        <div id="players"></div>
-      </section>
-
-      <section class="panel">
         <h2>分数与技能结果</h2>
         <div>我的技能：<span id="skills">-</span></div>
         <div>累计分：<span id="scores">-</span></div>
@@ -159,6 +162,6 @@
         <pre id="actionLog"></pre>
       </section>
     </main>
-    <script src="/app.js?v=20260508-astrology-result"></script>
+    <script src="/app.js?v=20260510-skill-rules"></script>
   </body>
 </html>

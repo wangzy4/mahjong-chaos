@@ -708,11 +708,15 @@ def _skill_unavailable_message(state: GameState, player_id: str, skill_id: str) 
     if skill_id == "wish_tile":
         if state.current_player_id != player_id:
             return f"自行印牌只能在自己摸牌前使用，当前轮到：{state.current_player_id}"
+        if state.last_discard is not None and state.last_discard.available_for_claim:
+            return "自行印牌需要在吃碰杠胡响应结束后、摸牌前使用"
         if state.current_turn_has_drawn:
             return "自行印牌需要在摸牌前使用；当前已经摸过牌"
     if skill_id == "recycle_river":
         if state.current_player_id != player_id:
             return f"回收牌河只能在自己摸牌前使用，当前轮到：{state.current_player_id}"
+        if state.last_discard is not None and state.last_discard.available_for_claim:
+            return "回收牌河需要在吃碰杠胡响应结束后、摸牌前使用"
         if state.current_turn_has_drawn:
             return "回收牌河需要在摸牌前使用；当前已经摸过牌"
     return "当前不能使用这个技能，请检查是否轮到你、是否在冷却中、参数是否正确"
